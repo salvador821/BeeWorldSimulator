@@ -1,4 +1,4 @@
--- Atlas v2 fr - Heartbeat Edition
+-- Atlas v2 fr - WORKING VERSION
 -- Made by sal
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -10,11 +10,8 @@ _G.SelectedField = "mango field"
 _G.WalkSpeed = 16
 _G.JumpPower = 50
 _G.TokenRange = 100
-_G.DebugText = "Script Loaded - Waiting for input..."
+_G.DebugText = "Script Loaded"
 _G.CurrentFarmField = nil
-_G.FarmTask = nil
-_G.DigTask = nil
-_G.IsMovingToField = false
 
 -- Field coordinates table
 local fieldCoords = {
@@ -40,358 +37,221 @@ local fieldCoords = {
 -- Create Window
 local Window = Rayfield:CreateWindow({
    Name = "Atlas v2 fr",
-   LoadingTitle = "Atlas v2 fr - Loading...",
+   LoadingTitle = "Atlas v2 fr",
    LoadingSubtitle = "made by sal",
    ConfigurationSaving = {
-      Enabled = true,
-      FolderName = "AtlasConfig",
-      FileName = "Atlasv2"
+      Enabled = false,
    },
    Discord = {
       Enabled = false,
-      Invite = "noinvitelink",
-      RememberJoins = true
    },
    KeySystem = false,
 })
 
 -- Services
 local Players = game:GetService("Players")
-local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
 -- Player reference
 local Player = Players.LocalPlayer
 
--- New Heartbeat-based wait function
-local function HeartbeatWait(seconds)
-    local start = os.clock()
-    while os.clock() - start < seconds do
-        RunService.Heartbeat:Wait()
-        if not _G.AutoFarm and not _G.AutoDig then
-            return false
-        end
-    end
-    return true
+-- Simple wait function
+local function Wait(seconds)
+    local start = tick()
+    repeat RunService.Heartbeat:Wait() until tick() - start >= seconds
 end
 
--- Quick wait function for small delays
-local function QuickWait(seconds)
-    local start = os.clock()
-    while os.clock() - start < seconds do
-        RunService.Heartbeat:Wait()
-    end
-    return true
-end
-
--- Debug logging function
+-- Debug function
 local function UpdateDebug(message)
     _G.DebugText = message
-    print("[Atlas Debug]: " .. message)
 end
 
--- Character safety function
+-- Get character
 local function GetCharacter()
-    local character = Player.Character
-    if not character then
-        UpdateDebug("Waiting for character to spawn...")
-        character = Player.CharacterAdded:Wait()
-        QuickWait(2) -- Wait for character to fully load
+    local char = Player.Character
+    if not char then
+        char = Player.CharacterAdded:Wait()
+        Wait(1)
     end
-    
-    if character then
-        local humanoid = character:FindFirstChild("Humanoid")
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        
-        if humanoid and hrp and humanoid.Health > 0 then
-            return character, humanoid, hrp
-        else
-            UpdateDebug("Character not ready or dead, waiting...")
-            QuickWait(3)
-            return GetCharacter()
-        end
-    end
-    
-    return nil
+    return char
 end
 
--- Apply speed and jump power
-local function ApplyCharacterStats()
-    local success, result = pcall(function()
-        local character, humanoid, hrp = GetCharacter()
-        if character and humanoid then
-            humanoid.WalkSpeed = _G.WalkSpeed
-            humanoid.JumpPower = _G.JumpPower
-            return true
-        end
-        return false
-    end)
-    
-    if not success then
-        UpdateDebug("Error applying character stats: " .. tostring(result))
+-- Apply speed
+local function ApplySpeed()
+    local char = GetCharacter()
+    if char and char:FindFirstChild("Humanoid") then
+        char.Humanoid.WalkSpeed = _G.WalkSpeed
+        char.Humanoid.JumpPower = _G.JumpPower
     end
 end
 
--- Auto-apply stats on character spawn
-Player.CharacterAdded:Connect(function(character)
-    QuickWait(2)
-    ApplyCharacterStats()
+-- Auto apply speed on respawn
+Player.CharacterAdded:Connect(function()
+    Wait(1)
+    ApplySpeed()
 end)
-
--- Simple movement function
-local function SimpleMoveTo(targetPosition)
-    return pcall(function()
-        local character, humanoid, hrp = GetCharacter()
-        if not character then return false end
-        
-        humanoid:MoveTo(targetPosition)
-        
-        -- Wait for movement with heartbeat
-        local startTime = os.clock()
-        local lastPosition = hrp.Position
-        local stuckCount = 0
-        
-        while os.clock() - startTime < 10 do
-            if not _G.AutoFarm then return false end
-            
-            local distance = (hrp.Position - targetPosition).Magnitude
-            if distance < 8 then
-                return true -- Close enough
-            end
-            
-            -- Check if stuck
-            if (hrp.Position - lastPosition).Magnitude < 1 then
-                stuckCount = stuckCount + 1
-                if stuckCount > 20 then
-                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                    QuickWait(0.5)
-                    stuckCount = 0
-                end
-            else
-                stuckCount = 0
-            end
-            
-            lastPosition = hrp.Position
-            RunService.Heartbeat:Wait()
-        end
-        
-        return false
-    end)
-end
 
 -- Check if at field
 local function IsAtField()
-    local character, humanoid, hrp = GetCharacter()
-    if not character then return false end
+    local char = GetCharacter()
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
     
     local fieldPos = fieldCoords[_G.SelectedField]
     if not fieldPos then return false end
     
-    local distance = (hrp.Position - fieldPos).Magnitude
-    return distance <= 30
+    return (hrp.Position - fieldPos).Magnitude < 50
 end
 
--- Get nearest token
+-- Move to position (SIMPLE VERSION)
+local function MoveToPosition(target)
+    local char = GetCharacter()
+    local humanoid = char:FindFirstChild("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    
+    if not humanoid or not hrp then return false end
+    
+    humanoid:MoveTo(target)
+    
+    local startTime = tick()
+    while tick() - startTime < 10 do
+        if (hrp.Position - target).Magnitude < 10 then
+            return true
+        end
+        Wait(0.1)
+    end
+    return false
+end
+
+-- Get nearest token (SIMPLE VERSION)
 local function GetNearestToken()
-    return pcall(function()
-        local character, humanoid, hrp = GetCharacter()
-        if not character then return nil end
-        
-        local tokensFolder = workspace:FindFirstChild("Debris")
-        if not tokensFolder then
-            tokensFolder = workspace:FindFirstChild("Tokens")
-        end
-        
-        if tokensFolder then
-            tokensFolder = tokensFolder:FindFirstChild("Tokens") or tokensFolder
-        end
-        
-        if not tokensFolder then
-            return nil
-        end
-        
-        local nearestToken = nil
-        local shortestDistance = math.huge
-        
-        for _, token in pairs(tokensFolder:GetChildren()) do
-            if not _G.AutoFarm then break end
-            
-            if token:IsA("Part") or token:IsA("MeshPart") then
-                local hasToken = token:FindFirstChild("Token") or token.Name:lower():find("token")
-                local collecting = token:FindFirstChild("Collecting")
-                
-                if hasToken and (not collecting or not collecting.Value) then
-                    local distance = (token.Position - hrp.Position).Magnitude
-                    
-                    if distance < _G.TokenRange and distance < shortestDistance then
-                        shortestDistance = distance
-                        nearestToken = token
-                    end
+    local char = GetCharacter()
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    
+    -- Look for tokens in workspace
+    local tokens = {}
+    
+    -- Check common token locations
+    local debris = workspace:FindFirstChild("Debris")
+    if debris then
+        local tokenFolder = debris:FindFirstChild("Tokens")
+        if tokenFolder then
+            for _, obj in pairs(tokenFolder:GetChildren()) do
+                if obj:IsA("Part") then
+                    table.insert(tokens, obj)
                 end
             end
         end
-        
-        return nearestToken
-    end)
+    end
+    
+    -- Also check workspace directly
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj:IsA("Part") and (obj.Name:lower():find("token") or obj:FindFirstChild("Token")) then
+            table.insert(tokens, obj)
+        end
+    end
+    
+    -- Find closest token
+    local closest = nil
+    local closestDist = math.huge
+    
+    for _, token in pairs(tokens) do
+        local dist = (token.Position - hrp.Position).Magnitude
+        if dist < _G.TokenRange and dist < closestDist then
+            closest = token
+            closestDist = dist
+        end
+    end
+    
+    return closest
 end
 
--- Navigate to field using simple movement
-local function NavigateToField()
-    return pcall(function()
-        _G.IsMovingToField = true
-        
-        local fieldPos = fieldCoords[_G.SelectedField]
-        if not fieldPos then
-            UpdateDebug("Invalid field selected")
-            return false
-        end
-        
-        UpdateDebug("Moving to " .. _G.SelectedField)
-        
-        local success = SimpleMoveTo(fieldPos)
-        
-        if success then
-            _G.CurrentFarmField = _G.SelectedField
-            UpdateDebug("Arrived at " .. _G.SelectedField)
-        else
-            UpdateDebug("Failed to reach field")
-        end
-        
-        _G.IsMovingToField = false
-        return success
-    end)
-end
--- Token collection system
-local function CollectTokens()
-    return pcall(function()
-        UpdateDebug("Collecting tokens in " .. _G.SelectedField)
-        
-        local tokensCollected = 0
-        local maxTokensPerCycle = 15
-        
-        while _G.AutoFarm and tokensCollected < maxTokensPerCycle do
-            -- Check if we need to go back to field
-            if not IsAtField() then
-                UpdateDebug("Not at field, returning...")
-                NavigateToField()
-                break
-            end
-            
-            local success, token = GetNearestToken()
-            
-            if success and token then
-                local distance = (token.Position - GetCharacter().Position).Magnitude
-                UpdateDebug("Moving to token (" .. math.floor(distance) .. " studs)")
-                
-                local moveSuccess = SimpleMoveTo(token.Position)
-                
-                if moveSuccess then
-                    tokensCollected = tokensCollected + 1
-                    UpdateDebug("Token collected " .. tokensCollected .. "/" .. maxTokensPerCycle)
-                    QuickWait(0.3) -- Small delay between collections
-                else
-                    UpdateDebug("Failed to reach token")
-                end
-            else
-                UpdateDebug("No tokens found, waiting...")
-                if not HeartbeatWait(2) then break end
-            end
-            
-            if not HeartbeatWait(0.5) then break end
-        end
-        
+-- Go to field function
+local function GoToField()
+    UpdateDebug("Going to " .. _G.SelectedField)
+    local fieldPos = fieldCoords[_G.SelectedField]
+    
+    if MoveToPosition(fieldPos) then
+        _G.CurrentFarmField = _G.SelectedField
+        UpdateDebug("Arrived at " .. _G.SelectedField)
         return true
-    end)
+    else
+        UpdateDebug("Failed to reach field")
+        return false
+    end
 end
 
--- Main farming loop
+-- Token collection function
+local function CollectTokens()
+    UpdateDebug("Collecting tokens...")
+    
+    for i = 1, 20 do -- Collect up to 20 tokens per cycle
+        if not _G.AutoFarm then break end
+        
+        local token = GetNearestToken()
+        if token then
+            UpdateDebug("Found token, moving to it")
+            MoveToPosition(token.Position)
+            Wait(0.5) -- Wait at token position
+        else
+            UpdateDebug("No tokens found")
+            break
+        end
+    end
+end
+-- Main farming function
 local function StartFarming()
-    if _G.FarmTask then return end
+    UpdateDebug("Auto Farm STARTED")
     
-    _G.FarmTask = task.spawn(function()
-        UpdateDebug("Auto Farm started")
-        
-        while _G.AutoFarm do
-            -- Always navigate to field first
-            if _G.CurrentFarmField ~= _G.SelectedField or not IsAtField() then
-                NavigateToField()
-            end
-            
-            -- If at field, collect tokens
-            if IsAtField() and _G.CurrentFarmField == _G.SelectedField then
-                CollectTokens()
-            end
-            
-            -- Small delay between cycles
-            if not HeartbeatWait(1) then break end
+    while _G.AutoFarm do
+        -- Always go to field first
+        if not IsAtField() or _G.CurrentFarmField ~= _G.SelectedField then
+            GoToField()
         end
         
-        UpdateDebug("Auto Farm stopped")
-        _G.FarmTask = nil
-    end)
+        -- If we're at the field, collect tokens
+        if IsAtField() then
+            CollectTokens()
+        end
+        
+        Wait(1)
+    end
+    
+    UpdateDebug("Auto Farm STOPPED")
 end
 
--- Auto Dig system
-local function StartAutoDig()
-    if _G.DigTask then return end
+-- Auto Dig function
+local function StartDigging()
+    UpdateDebug("Auto Dig STARTED")
     
-    _G.DigTask = task.spawn(function()
-        UpdateDebug("Auto Dig started")
+    while _G.AutoDig do
+        local char = GetCharacter()
         
-        while _G.AutoDig do
-            local digSuccess = pcall(function()
-                local character = GetCharacter()
-                if not character then return end
-                
-                local toolsFired = 0
-                
-                for _, item in ipairs(character:GetChildren()) do
-                    if not _G.AutoDig then break end
-                    
-                    if item:IsA("Tool") then
-                        local toolRemote = item:FindFirstChild("ToolRemote") or 
-                                         item:FindFirstChild("Remote") or
-                                         item:FindFirstChild("Activate")
-                        
-                        if toolRemote and toolRemote:IsA("RemoteEvent") then
-                            local fireSuccess = pcall(function()
-                                toolRemote:FireServer()
-                            end)
-                            
-                            if fireSuccess then
-                                toolsFired = toolsFired + 1
-                            end
-                        end
-                    end
+        -- Fire all tools
+        for _, tool in pairs(char:GetChildren()) do
+            if tool:IsA("Tool") then
+                local remote = tool:FindFirstChild("ToolRemote")
+                if remote then
+                    remote:FireServer()
                 end
-                
-                if toolsFired > 0 then
-                    UpdateDebug("Fired " .. toolsFired .. " tool remotes")
-                end
-                
-                HeartbeatWait(0.1)
-            end)
-            
-            if not digSuccess then
-                UpdateDebug("Error in auto dig, continuing...")
-                HeartbeatWait(1)
             end
         end
         
-        UpdateDebug("Auto Dig stopped")
-        _G.DigTask = nil
-    end)
+        Wait(0.1)
+    end
+    
+    UpdateDebug("Auto Dig STOPPED")
 end
 
--- Create UI Tabs
-local MainTab = Window:CreateTab("Main Features", 4483362458)
+-- Create UI
+local MainTab = Window:CreateTab("Main", 4483362458)
 local SettingsTab = Window:CreateTab("Settings", 4483362458)
-local InfoTab = Window:CreateTab("Information", 4483362458)
+local InfoTab = Window:CreateTab("Info", 4483362458)
 
--- Field Selector Dropdown
+-- Field dropdown
 local FieldDropdown = MainTab:CreateDropdown({
-    Name = "Select Farming Field",
+    Name = "Field",
     Options = {
         "mango field", "blueberry field", "daisy field", "cactus field", 
         "strawberry field", "apple field", "lemon field", "grape field", 
@@ -403,11 +263,11 @@ local FieldDropdown = MainTab:CreateDropdown({
     Flag = "FieldDropdown",
     Callback = function(Option)
         _G.SelectedField = Option
-        UpdateDebug("Field changed to: " .. Option)
+        UpdateDebug("Field: " .. Option)
     end,
 })
 
--- Auto Dig Toggle
+-- Auto Dig toggle
 local AutoDigToggle = MainTab:CreateToggle({
     Name = "Auto Dig",
     CurrentValue = false,
@@ -415,42 +275,28 @@ local AutoDigToggle = MainTab:CreateToggle({
     Callback = function(Value)
         _G.AutoDig = Value
         if Value then
-            StartAutoDig()
-        else
-            if _G.DigTask then
-                task.cancel(_G.DigTask)
-                _G.DigTask = nil
-            end
-            UpdateDebug("Auto Dig disabled")
+            coroutine.wrap(StartDigging)()
         end
     end,
 })
 
--- Auto Farm Toggle
+-- Auto Farm toggle
 local AutoFarmToggle = MainTab:CreateToggle({
-    Name = "Auto Farm Tokens",
+    Name = "Auto Farm",
     CurrentValue = false,
     Flag = "AutoFarmToggle",
     Callback = function(Value)
         _G.AutoFarm = Value
         if Value then
-            _G.CurrentFarmField = nil
-            StartFarming()
-        else
-            if _G.FarmTask then
-                task.cancel(_G.FarmTask)
-                _G.FarmTask = nil
-            end
-            _G.IsMovingToField = false
-            UpdateDebug("Auto Farm disabled")
+            _G.CurrentFarmField = nil -- Force field change
+            coroutine.wrap(StartFarming)()
         end
     end,
 })
 
--- Settings Section
-SettingsTab:CreateSection("Character Settings")
+-- Settings
+SettingsTab:CreateSection("Movement")
 
--- Walk Speed Slider
 local WalkSpeedSlider = SettingsTab:CreateSlider({
     Name = "Walk Speed",
     Range = {16, 120},
@@ -460,12 +306,10 @@ local WalkSpeedSlider = SettingsTab:CreateSlider({
     Flag = "WalkSpeedSlider",
     Callback = function(Value)
         _G.WalkSpeed = Value
-        ApplyCharacterStats()
-        UpdateDebug("Walk speed set to: " .. Value)
+        ApplySpeed()
     end,
 })
 
--- Jump Power Slider
 local JumpPowerSlider = SettingsTab:CreateSlider({
     Name = "Jump Power",
     Range = {50, 120},
@@ -475,16 +319,14 @@ local JumpPowerSlider = SettingsTab:CreateSlider({
     Flag = "JumpPowerSlider",
     Callback = function(Value)
         _G.JumpPower = Value
-        ApplyCharacterStats()
-        UpdateDebug("Jump power set to: " .. Value)
+        ApplySpeed()
     end,
 })
 
-SettingsTab:CreateSection("Farming Settings")
+SettingsTab:CreateSection("Farming")
 
--- Token Range Slider
 local TokenRangeSlider = SettingsTab:CreateSlider({
-    Name = "Token Detection Range",
+    Name = "Token Range",
     Range = {50, 500},
     Increment = 10,
     Suffix = "Studs",
@@ -492,93 +334,38 @@ local TokenRangeSlider = SettingsTab:CreateSlider({
     Flag = "TokenRangeSlider",
     Callback = function(Value)
         _G.TokenRange = Value
-        UpdateDebug("Token range set to: " .. Value .. " studs")
     end,
 })
 
--- Emergency Stop Button
-local EmergencyStop = SettingsTab:CreateButton({
-    Name = "EMERGENCY STOP",
+-- Emergency stop
+SettingsTab:CreateButton({
+    Name = "STOP ALL",
     Callback = function()
         _G.AutoDig = false
         _G.AutoFarm = false
-        
-        if _G.DigTask then
-            task.cancel(_G.DigTask)
-            _G.DigTask = nil
-        end
-        
-        if _G.FarmTask then
-            task.cancel(_G.FarmTask)
-            _G.FarmTask = nil
-        end
-        
-        _G.IsMovingToField = false
-        UpdateDebug("EMERGENCY STOP - All functions disabled")
-        
-        -- Reset character speed
-        _G.WalkSpeed = 16
-        _G.JumpPower = 50
-        ApplyCharacterStats()
+        UpdateDebug("EVERYTHING STOPPED")
     end,
 })
 
--- Information Tab
-InfoTab:CreateSection("Script Information")
+-- Info tab
 InfoTab:CreateLabel("Atlas v2 fr - Made by sal")
-InfoTab:CreateLabel("Auto Dig: Fires all ToolRemotes every 0.1s")
-InfoTab:CreateLabel("Auto Farm: Goes to field then collects tokens")
-InfoTab:CreateLabel("Field Selector: Choose where to farm")
-InfoTab:CreateLabel("Token Range: How far to look for tokens")
+InfoTab:CreateLabel("Auto Dig: Fires ToolRemote every 0.1s")
+InfoTab:CreateLabel("Auto Farm: Goes to field and collects tokens")
+InfoTab:CreateLabel("Field: Select where to farm")
 
--- Debug Section
-InfoTab:CreateSection("Live Debug Information")
 local DebugLabel = InfoTab:CreateLabel("Debug: " .. _G.DebugText)
 
--- Status monitor
-InfoTab:CreateSection("Current Status")
-local StatusLabel = InfoTab:CreateLabel("Status: Idle")
-local FieldLabel = InfoTab:CreateLabel("Current Field: None")
-local TokenLabel = InfoTab:CreateLabel("Token Range: " .. _G.TokenRange .. " studs")
-
--- Real-time status updates
-task.spawn(function()
+-- Update debug display
+spawn(function()
     while true do
-        -- Update debug label
         DebugLabel:Set("Text", "Debug: " .. _G.DebugText)
-        
-        -- Update status
-        local status = "Idle"
-        if _G.AutoFarm and _G.IsMovingToField then
-            status = "Moving to Field"
-        elseif _G.AutoFarm then
-            status = "Farming"
-        elseif _G.AutoDig then
-            status = "Auto Digging"
-        end
-        StatusLabel:Set("Text", "Status: " .. status)
-        
-        -- Update field info
-        FieldLabel:Set("Text", "Current Field: " .. _G.SelectedField)
-        
-        -- Update token range
-        TokenLabel:Set("Text", "Token Range: " .. _G.TokenRange .. " studs")
-        
-        QuickWait(0.5)
+        Wait(0.5)
     end
 end)
 
--- Apply on script start
-task.spawn(function()
-    QuickWait(3)
-    ApplyCharacterStats()
-    UpdateDebug("Ready to use - Made by sal")
-end)
+-- Apply speed on start
+Wait(2)
+ApplySpeed()
+UpdateDebug("READY - Select field and enable features")
 
--- Load saved configuration
-Rayfield:LoadConfiguration()
-
-UpdateDebug("Atlas v2 fr loaded successfully!")
-UpdateDebug("Select a field and enable Auto Farm to start")
-
-return "Atlas v2 fr - Heartbeat Edition loaded!"
+print("Atlas v2 fr - MADE BY SAL - LOADED SUCCESSFULLY")
