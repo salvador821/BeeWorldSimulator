@@ -1,4 +1,4 @@
--- Atlas v2 fr - WORKING VERSION
+-- Atlas v2 fr - HEARTBEAT FIXED VERSION
 -- Made by sal
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -12,6 +12,8 @@ _G.JumpPower = 50
 _G.TokenRange = 100
 _G.DebugText = "Script Loaded"
 _G.CurrentFarmField = nil
+_G.FarmConnection = nil
+_G.DigConnection = nil
 
 -- Field coordinates table
 local fieldCoords = {
@@ -55,10 +57,23 @@ local RunService = game:GetService("RunService")
 -- Player reference
 local Player = Players.LocalPlayer
 
--- Simple wait function
-local function Wait(seconds)
-    local start = tick()
-    repeat RunService.Heartbeat:Wait() until tick() - start >= seconds
+-- Heartbeat wait function
+local function HeartbeatWait(seconds)
+    local start = os.clock()
+    while os.clock() - start < seconds and RunService.Heartbeat:Wait() do
+        if not _G.AutoFarm and not _G.AutoDig then
+            return false
+        end
+    end
+    return true
+end
+
+-- Quick heartbeat wait (non-interruptible)
+local function QuickWait(seconds)
+    local start = os.clock()
+    while os.clock() - start < seconds do
+        RunService.Heartbeat:Wait()
+    end
 end
 
 -- Debug function
@@ -71,7 +86,7 @@ local function GetCharacter()
     local char = Player.Character
     if not char then
         char = Player.CharacterAdded:Wait()
-        Wait(1)
+        QuickWait(1)
     end
     return char
 end
@@ -87,7 +102,7 @@ end
 
 -- Auto apply speed on respawn
 Player.CharacterAdded:Connect(function()
-    Wait(1)
+    QuickWait(1)
     ApplySpeed()
 end)
 
@@ -103,7 +118,7 @@ local function IsAtField()
     return (hrp.Position - fieldPos).Magnitude < 50
 end
 
--- Move to position (SIMPLE VERSION)
+-- Simple movement with heartbeat
 local function MoveToPosition(target)
     local char = GetCharacter()
     local humanoid = char:FindFirstChild("Humanoid")
@@ -113,27 +128,26 @@ local function MoveToPosition(target)
     
     humanoid:MoveTo(target)
     
-    local startTime = tick()
-    while tick() - startTime < 10 do
+    local startTime = os.clock()
+    while os.clock() - startTime < 10 do
         if (hrp.Position - target).Magnitude < 10 then
             return true
         end
-        Wait(0.1)
+        RunService.Heartbeat:Wait()
     end
     return false
 end
 
--- Get nearest token (SIMPLE VERSION)
+-- Get nearest token
 local function GetNearestToken()
     local char = GetCharacter()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
     
-    -- Look for tokens in workspace
+    -- Look for tokens in common locations
+    local debris = workspace:FindFirstChild("Debris")
     local tokens = {}
     
-    -- Check common token locations
-    local debris = workspace:FindFirstChild("Debris")
     if debris then
         local tokenFolder = debris:FindFirstChild("Tokens")
         if tokenFolder then
@@ -145,14 +159,14 @@ local function GetNearestToken()
         end
     end
     
-    -- Also check workspace directly
+    -- Search workspace
     for _, obj in pairs(workspace:GetChildren()) do
         if obj:IsA("Part") and (obj.Name:lower():find("token") or obj:FindFirstChild("Token")) then
             table.insert(tokens, obj)
         end
     end
     
-    -- Find closest token
+    -- Find closest
     local closest = nil
     local closestDist = math.huge
     
@@ -167,9 +181,9 @@ local function GetNearestToken()
     return closest
 end
 
--- Go to field function
+-- Go to field function - FIXED
 local function GoToField()
-    UpdateDebug("Going to " .. _G.SelectedField)
+    UpdateDebug("Moving to " .. _G.SelectedField)
     local fieldPos = fieldCoords[_G.SelectedField]
     
     if MoveToPosition(fieldPos) then
@@ -182,66 +196,83 @@ local function GoToField()
     end
 end
 
--- Token collection function
+-- Token collection
 local function CollectTokens()
     UpdateDebug("Collecting tokens...")
     
-    for i = 1, 20 do -- Collect up to 20 tokens per cycle
+    for i = 1, 15 do
         if not _G.AutoFarm then break end
         
         local token = GetNearestToken()
         if token then
-            UpdateDebug("Found token, moving to it")
+            UpdateDebug("Moving to token")
             MoveToPosition(token.Position)
-            Wait(0.5) -- Wait at token position
+            QuickWait(0.5)
         else
             UpdateDebug("No tokens found")
             break
         end
     end
 end
--- Main farming function
+-- Main farming with heartbeat connection
 local function StartFarming()
+    if _G.FarmConnection then
+        _G.FarmConnection:Disconnect()
+        _G.FarmConnection = nil
+    end
+    
     UpdateDebug("Auto Farm STARTED")
     
-    while _G.AutoFarm do
-        -- Always go to field first
-        if not IsAtField() or _G.CurrentFarmField ~= _G.SelectedField then
+    _G.FarmConnection = RunService.Heartbeat:Connect(function()
+        if not _G.AutoFarm then
+            _G.FarmConnection:Disconnect()
+            _G.FarmConnection = nil
+            return
+        end
+        
+        -- Force field navigation when field changes
+        if _G.CurrentFarmField ~= _G.SelectedField or not IsAtField() then
             GoToField()
         end
         
-        -- If we're at the field, collect tokens
+        -- Collect tokens if at field
         if IsAtField() then
             CollectTokens()
         end
-        
-        Wait(1)
-    end
-    
-    UpdateDebug("Auto Farm STOPPED")
+    end)
 end
 
--- Auto Dig function
+-- Auto Dig with heartbeat connection
 local function StartDigging()
-    UpdateDebug("Auto Dig STARTED")
-    
-    while _G.AutoDig do
-        local char = GetCharacter()
-        
-        -- Fire all tools
-        for _, tool in pairs(char:GetChildren()) do
-            if tool:IsA("Tool") then
-                local remote = tool:FindFirstChild("ToolRemote")
-                if remote then
-                    remote:FireServer()
-                end
-            end
-        end
-        
-        Wait(0.1)
+    if _G.DigConnection then
+        _G.DigConnection:Disconnect()
+        _G.DigConnection = nil
     end
     
-    UpdateDebug("Auto Dig STOPPED")
+    UpdateDebug("Auto Dig STARTED")
+    
+    local lastDigTime = 0
+    _G.DigConnection = RunService.Heartbeat:Connect(function()
+        if not _G.AutoDig then
+            _G.DigConnection:Disconnect()
+            _G.DigConnection = nil
+            return
+        end
+        
+        -- Dig every 0.1 seconds
+        if os.clock() - lastDigTime >= 0.1 then
+            local char = GetCharacter()
+            for _, tool in pairs(char:GetChildren()) do
+                if tool:IsA("Tool") then
+                    local remote = tool:FindFirstChild("ToolRemote")
+                    if remote then
+                        remote:FireServer()
+                    end
+                end
+            end
+            lastDigTime = os.clock()
+        end
+    end)
 end
 
 -- Create UI
@@ -264,6 +295,10 @@ local FieldDropdown = MainTab:CreateDropdown({
     Callback = function(Option)
         _G.SelectedField = Option
         UpdateDebug("Field: " .. Option)
+        -- Force field change when dropdown changes
+        if _G.AutoFarm then
+            _G.CurrentFarmField = nil
+        end
     end,
 })
 
@@ -275,12 +310,18 @@ local AutoDigToggle = MainTab:CreateToggle({
     Callback = function(Value)
         _G.AutoDig = Value
         if Value then
-            coroutine.wrap(StartDigging)()
+            StartDigging()
+        else
+            if _G.DigConnection then
+                _G.DigConnection:Disconnect()
+                _G.DigConnection = nil
+            end
+            UpdateDebug("Auto Dig disabled")
         end
     end,
 })
 
--- Auto Farm toggle
+-- Auto Farm toggle - FIXED FIELD NAVIGATION
 local AutoFarmToggle = MainTab:CreateToggle({
     Name = "Auto Farm",
     CurrentValue = false,
@@ -288,8 +329,15 @@ local AutoFarmToggle = MainTab:CreateToggle({
     Callback = function(Value)
         _G.AutoFarm = Value
         if Value then
-            _G.CurrentFarmField = nil -- Force field change
-            coroutine.wrap(StartFarming)()
+            -- ALWAYS reset field when toggling on
+            _G.CurrentFarmField = nil
+            StartFarming()
+        else
+            if _G.FarmConnection then
+                _G.FarmConnection:Disconnect()
+                _G.FarmConnection = nil
+            end
+            UpdateDebug("Auto Farm disabled")
         end
     end,
 })
@@ -343,6 +391,17 @@ SettingsTab:CreateButton({
     Callback = function()
         _G.AutoDig = false
         _G.AutoFarm = false
+        
+        if _G.DigConnection then
+            _G.DigConnection:Disconnect()
+            _G.DigConnection = nil
+        end
+        
+        if _G.FarmConnection then
+            _G.FarmConnection:Disconnect()
+            _G.FarmConnection = nil
+        end
+        
         UpdateDebug("EVERYTHING STOPPED")
     end,
 })
@@ -355,17 +414,14 @@ InfoTab:CreateLabel("Field: Select where to farm")
 
 local DebugLabel = InfoTab:CreateLabel("Debug: " .. _G.DebugText)
 
--- Update debug display
-spawn(function()
-    while true do
-        DebugLabel:Set("Text", "Debug: " .. _G.DebugText)
-        Wait(0.5)
-    end
+-- Update debug display with heartbeat
+_G.DebugConnection = RunService.Heartbeat:Connect(function()
+    DebugLabel:Set("Text", "Debug: " .. _G.DebugText)
 end)
 
 -- Apply speed on start
-Wait(2)
+QuickWait(2)
 ApplySpeed()
 UpdateDebug("READY - Select field and enable features")
 
-print("Atlas v2 fr - MADE BY SAL - LOADED SUCCESSFULLY")
+print("Atlas v2 fr - HEARTBEAT EDITION - LOADED SUCCESSFULLY")
