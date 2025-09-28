@@ -48,6 +48,7 @@ _G.JumpPower = 50
 _G.TokenRange = 100
 _G.DebugText = "Waiting..."
 _G.CurrentFarmField = nil
+_G.FarmTask = nil
 
 -- Main Tab
 local MainTab = Window:CreateTab("Main Features", 4483362458)
@@ -150,7 +151,7 @@ local FieldDropdown = MainTab:CreateDropdown({
     end,
 })
 
--- Pathfinding function to move to a position
+-- Updated pathfinding function with retry mechanism
 local function moveToPosition(targetPosition)
     local PathfindingService = game:GetService("PathfindingService")
     local player = game.Players.LocalPlayer
@@ -179,23 +180,50 @@ local function moveToPosition(targetPosition)
         for i, waypoint in ipairs(waypoints) do
             if not _G.AutoFarm then break end
             
-            humanoid:MoveTo(waypoint.Position)
-            
             if waypoint.Action == Enum.PathWaypointAction.Jump then
                 humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
             end
             
-            local reached = humanoid.MoveToFinished:Wait(5)
+            -- Retry loop for each waypoint if stuck
+            local reached = false
+            local tries = 0
+            while not reached and tries < 3 do
+                humanoid:MoveTo(waypoint.Position)
+                reached = humanoid.MoveToFinished:Wait(5)
+                tries = tries + 1
+                if not reached then
+                    _G.DebugText = "Stuck at waypoint " .. i .. ", retrying (" .. tries .. "/3)"
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                    task.wait(0.5)
+                end
+            end
+            
             if not reached then
-                _G.DebugText = "Stuck, recomputing path..."
-                return moveToPosition(targetPosition)
+                _G.DebugText = "Gave up on waypoint " .. i .. " after 3 tries, continuing anyway"
             end
         end
         return true
     else
         _G.DebugText = "No path found, using direct movement"
-        humanoid:MoveTo(targetPosition)
-        humanoid.MoveToFinished:Wait(5)
+        
+        -- Similar retry for direct movement
+        local reached = false
+        local tries = 0
+        while not reached and tries < 3 do
+            humanoid:MoveTo(targetPosition)
+            reached = humanoid.MoveToFinished:Wait(5)
+            tries = tries + 1
+            if not reached then
+                _G.DebugText = "Stuck on direct move, retrying (" .. tries .. "/3)"
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                task.wait(0.5)
+            end
+        end
+        
+        if not reached then
+            _G.DebugText = "Gave up on direct move after 3 tries"
+            return false
+        end
         return true
     end
 end
@@ -228,7 +256,7 @@ local AutoDigToggle = MainTab:CreateToggle({
    end,
 })
 
--- Auto Farm Section
+-- Auto Farm Section with task management
 local AutoFarmToggle = MainTab:CreateToggle({
    Name = "Auto Farm Tokens",
    CurrentValue = false,
@@ -238,8 +266,11 @@ local AutoFarmToggle = MainTab:CreateToggle({
            _G.AutoFarm = true
            _G.DebugText = "Auto Farm Started"
            
-           -- Start the main farming loop
-           task.spawn(function()
+           if _G.FarmTask then
+               task.cancel(_G.FarmTask)
+           end
+           
+           _G.FarmTask = task.spawn(function()
                while _G.AutoFarm do
                    pcall(function()
                        local player = game.Players.LocalPlayer
@@ -313,11 +344,16 @@ local AutoFarmToggle = MainTab:CreateToggle({
                    end)
                    task.wait(0.5)
                end
+               _G.FarmTask = nil
            end)
        else
            _G.AutoFarm = false
            _G.CurrentFarmField = nil
            _G.DebugText = "Auto Farm Stopped"
+           if _G.FarmTask then
+               task.cancel(_G.FarmTask)
+           end
+           _G.FarmTask = nil
        end
    end,
 })
