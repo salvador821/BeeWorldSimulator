@@ -46,7 +46,9 @@ _G.SelectedField = "mango field"
 _G.TweenSpeed = 50
 _G.WalkSpeed = 16
 _G.JumpPower = 50
+_G.TokenRange = 100
 _G.DebugText = "Waiting..."
+_G.CurrentFarmField = nil
 
 -- Main Tab
 local MainTab = Window:CreateTab("Main Features", 4483362458)
@@ -95,6 +97,19 @@ local JumpPowerSlider = SettingsTab:CreateSlider({
     end,
 })
 
+-- Token Range Slider
+local TokenRangeSlider = SettingsTab:CreateSlider({
+    Name = "Token Range Limit",
+    Range = {50, 500},
+    Increment = 10,
+    Suffix = "Studs",
+    CurrentValue = 100,
+    Flag = "TokenRangeSlider",
+    Callback = function(Value)
+        _G.TokenRange = Value
+    end,
+})
+
 -- Function to apply speed and jump power
 function applySpeed()
     local player = game.Players.LocalPlayer
@@ -110,7 +125,7 @@ end
 
 -- Apply speed on character spawn
 game.Players.LocalPlayer.CharacterAdded:Connect(function(character)
-    wait(1) -- Wait for humanoid to load
+    wait(1)
     applySpeed()
 end)
 
@@ -187,8 +202,8 @@ local AutoFarmToggle = MainTab:CreateToggle({
            _G.AutoFarm = true
            _G.DebugText = "Auto Farm Started"
            
-           -- Store the field when we start farming
-           local currentFarmField = _G.SelectedField
+           -- Reset current farm field to force tween
+           _G.CurrentFarmField = nil
            
            -- Function to tween to field
            local function tweenToField()
@@ -208,7 +223,7 @@ local AutoFarmToggle = MainTab:CreateToggle({
                    
                    local TweenService = game:GetService("TweenService")
                    local tweenInfo = TweenInfo.new(
-                       duration,
+                       math.max(1, duration), -- Minimum 1 second
                        Enum.EasingStyle.Linear,
                        Enum.EasingDirection.Out,
                        0,
@@ -225,119 +240,85 @@ local AutoFarmToggle = MainTab:CreateToggle({
                    tween:Play()
                    tween.Completed:Wait()
                    _G.DebugText = "Arrived at " .. _G.SelectedField
+                   _G.CurrentFarmField = _G.SelectedField
                    return true
                end
                return false
            end
            
-           -- Tween to field first
-           tweenToField()
-           
-           -- After tween completes, start pathfinding
-           local Players = game:GetService("Players")
-           local PathfindingService = game:GetService("PathfindingService")
-           local RunService = game:GetService("RunService")
-
-           local player = Players.LocalPlayer
-           local character = player.Character or player.CharacterAdded:Wait()
-           local humanoid = character:WaitForChild("Humanoid")
-           local hrp = character:WaitForChild("HumanoidRootPart")
-
-           local pathParams = {
-               AgentRadius = 2,
-               AgentHeight = 5,
-               AgentCanJump = true,
-               AgentCanClimb = true,
-               WaypointSpacing = 3,
-               Costs = {
-                   Water = 20,
-               }
-           }
-
-           local function getNearestToken()
-               local closestToken = nil
-               local shortestDistance = math.huge
-
-               local tokensFolder = workspace:FindFirstChild("Debris") and workspace.Debris:FindFirstChild("Tokens")
-               if not tokensFolder then 
-                   _G.DebugText = "No Tokens folder found"
-                   return nil 
-               end
-
-               for _, token in pairs(tokensFolder:GetChildren()) do
-                   if token:IsA("BasePart") and token:FindFirstChild("Token") and token:FindFirstChild("Collecting") and not token.Collecting.Value then
-                       local distance = (token.Position - hrp.Position).Magnitude
-                       if distance < shortestDistance then
-                           shortestDistance = distance
-                           closestToken = token
-                       end
-                   end
-               end
-
-               return closestToken, shortestDistance
-           end
-
-           local function moveToTarget(target)
-               local path = PathfindingService:CreatePath(pathParams)
-               path:ComputeAsync(hrp.Position, target.Position)
-               
-               if path.Status == Enum.PathStatus.Success then
-                   local waypoints = path:GetWaypoints()
-                   
-                   local blockedConnection
-                   blockedConnection = path.Blocked:Connect(function(blockedWaypointIndex)
-                       blockedConnection:Disconnect()
-                       moveToTarget(target)
-                   end)
-                   
-                   for i, waypoint in ipairs(waypoints) do
-                       humanoid:MoveTo(waypoint.Position)
-                       if waypoint.Action == Enum.PathWaypointAction.Jump then
-                           humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                       end
-                       
-                       local reached = humanoid.MoveToFinished:Wait(8)
-                       if not reached then
-                           blockedConnection:Disconnect()
-                           moveToTarget(target)
-                           return
-                       end
-                   end
-                   blockedConnection:Disconnect()
-               else
-                   _G.DebugText = "No path found, using direct MoveTo"
-                   humanoid:MoveTo(target.Position)
-                   humanoid.MoveToFinished:Wait()
-               end
-           end
-
+           -- Start the main farming loop
            task.spawn(function()
                while _G.AutoFarm do
                    pcall(function()
-                       -- Check if field changed mid-farming
-                       if _G.SelectedField ~= currentFarmField then
+                       local player = game.Players.LocalPlayer
+                       local character = player.Character
+                       if not character then
+                           character = player.CharacterAdded:Wait()
+                       end
+                       local hrp = character:WaitForChild("HumanoidRootPart")
+                       local humanoid = character:WaitForChild("Humanoid")
+                       
+                       -- Check if we need to tween to field
+                       if _G.CurrentFarmField ~= _G.SelectedField then
                            _G.DebugText = "Field changed! Tweening to new field..."
-                           currentFarmField = _G.SelectedField
                            tweenToField()
                        end
                        
-                       local token, dist = getNearestToken()
-                       if token then
-                           _G.DebugText = "Moving to token (" .. math.floor(dist) .. " studs away)"
-                           if dist > 5 then
-                               moveToTarget(token)
-                           else
-                               _G.DebugText = "Collecting token..."
-                           end
+                       -- Check if we're at the field (close enough)
+                       local fieldPos = fieldCoords[_G.SelectedField]
+                       local distanceToField = (hrp.Position - fieldPos).Magnitude
+                       
+                       if distanceToField > 50 then
+                           _G.DebugText = "Too far from field, tweening again..."
+                           tweenToField()
                        else
-                           _G.DebugText = "No tokens found"
+                           _G.DebugText = "At field, searching for tokens..."
+                           
+                           -- Token collection logic
+                           local tokensFolder = workspace:FindFirstChild("Debris") and workspace.Debris:FindFirstChild("Tokens")
+                           if tokensFolder then
+                               local nearestToken = nil
+                               local shortestDistance = math.huge
+                               
+                               for _, token in pairs(tokensFolder:GetChildren()) do
+                                   if token:IsA("BasePart") and token:FindFirstChild("Token") then
+                                       local collecting = token:FindFirstChild("Collecting")
+                                       if collecting and not collecting.Value then
+                                           local distance = (token.Position - hrp.Position).Magnitude
+                                           
+                                           -- Only consider tokens within range
+                                           if distance < _G.TokenRange and distance < shortestDistance then
+                                               shortestDistance = distance
+                                               nearestToken = token
+                                           end
+                                       end
+                                   end
+                               end
+                               
+                               if nearestToken then
+                                   _G.DebugText = "Moving to token (" .. math.floor(shortestDistance) .. " studs)"
+                                   
+                                   -- Simple movement to token (bypass pathfinding if it's not working)
+                                   humanoid:MoveTo(nearestToken.Position)
+                                   
+                                   -- Wait a bit for movement
+                                   task.wait(2)
+                               else
+                                   _G.DebugText = "No tokens found in range (" .. _G.TokenRange .. " studs)"
+                                   task.wait(1)
+                               end
+                           else
+                               _G.DebugText = "No Tokens folder found"
+                               task.wait(1)
+                           end
                        end
-                       task.wait(0.1)
                    end)
+                   task.wait(0.5) -- Small delay between cycles
                end
            end)
        else
            _G.AutoFarm = false
+           _G.CurrentFarmField = nil
            _G.DebugText = "Auto Farm Stopped"
        end
    end,
@@ -346,21 +327,14 @@ local AutoFarmToggle = MainTab:CreateToggle({
 -- Info Tab
 local InfoTab = Window:CreateTab("Information", 4483362458)
 
+local DebugLabel = InfoTab:CreateLabel("Debug: " .. _G.DebugText)
 InfoTab:CreateLabel("Auto Dig: Fires ToolRemote every 0.1 seconds")
-InfoTab:CreateLabel("Auto Farm: Tweens to selected field then collects tokens")
-InfoTab:CreateLabel("Debug: " .. _G.DebugText)
+InfoTab:CreateLabel("Auto Farm: Tweens to field then collects tokens")
 
 -- Update debug label every second
 task.spawn(function()
-    while task.wait(1) do
-        if InfoTab then
-            -- Refresh the debug label
-            for i, v in pairs(InfoTab:GetChildren()) do
-                if v.Name == "TextLabel" and string.find(v.Text, "Debug:") then
-                    v:Set("Text", "Debug: " .. _G.DebugText)
-                end
-            end
-        end
+    while task.wait(0.5) do
+        DebugLabel:Set("Text", "Debug: " .. _G.DebugText)
     end
 end)
 
