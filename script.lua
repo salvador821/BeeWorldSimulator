@@ -1,4 +1,4 @@
--- Atlas v2 fr - FINAL WORKING VERSION
+-- Atlas v2 fr - FIELD SWITCH FIXED
 -- Made by sal
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -209,6 +209,12 @@ local function CollectTokens()
     
     local tokensCollected = 0
     while _G.AutoFarm and tokensCollected < 10 do
+        -- CHECK FOR FIELD CHANGE DURING TOKEN COLLECTION
+        if _G.CurrentFarmField ~= _G.SelectedField then
+            UpdateDebug("FIELD CHANGED - STOPPING TOKEN COLLECTION")
+            return
+        end
+        
         local token = GetNearestToken()
         if token then
             UpdateDebug("Found token, moving to it")
@@ -222,7 +228,7 @@ local function CollectTokens()
     end
 end
 
--- MAIN FARMING FUNCTION - COMPLETELY REWRITTEN
+-- MAIN FARMING FUNCTION - FIXED FIELD SWITCHING
 local function FarmLoop()
     if _G.FarmRunning then return end
     _G.FarmRunning = true
@@ -230,29 +236,32 @@ local function FarmLoop()
     UpdateDebug("FARM LOOP STARTED")
     
     while _G.AutoFarm do
-        -- ALWAYS go to field first, no matter what
-        UpdateDebug("STEP 1: Going to field...")
-        if not GoToField() then
-            UpdateDebug("Failed to go to field, retrying...")
-            Wait(2)
-            continue
+        -- CHECK FOR FIELD CHANGE AT START OF EVERY CYCLE
+        if _G.CurrentFarmField ~= _G.SelectedField then
+            UpdateDebug("FIELD CHANGED DETECTED - GOING TO NEW FIELD")
+        end
+        
+        -- ALWAYS go to field first if we're not at the correct field
+        if _G.CurrentFarmField ~= _G.SelectedField or not IsAtField() then
+            UpdateDebug("STEP 1: Going to field...")
+            if not GoToField() then
+                UpdateDebug("Failed to go to field, retrying...")
+                Wait(2)
+                continue
+            end
+        else
+            UpdateDebug("Already at correct field, collecting tokens...")
         end
         
         -- Wait a moment to ensure we're at field
         Wait(1)
         
-        -- Collect tokens
+        -- Collect tokens (but check for field change during collection)
         UpdateDebug("STEP 2: Collecting tokens...")
         CollectTokens()
         
         -- Small delay before next cycle
         Wait(1)
-        
-        -- Force check if we need to change fields
-        if _G.CurrentFarmField ~= _G.SelectedField then
-            UpdateDebug("Field changed detected, restarting cycle...")
-            -- This will force going to new field on next loop
-        end
     end
     
     _G.FarmRunning = false
@@ -291,7 +300,7 @@ local MainTab = Window:CreateTab("Main", 4483362458)
 local SettingsTab = Window:CreateTab("Settings", 4483362458)
 local InfoTab = Window:CreateTab("Info", 4483362458)
 
--- Field dropdown
+-- Field dropdown - FIXED FIELD SWITCHING
 local FieldDropdown = MainTab:CreateDropdown({
     Name = "Field",
     Options = {
@@ -306,8 +315,9 @@ local FieldDropdown = MainTab:CreateDropdown({
     Callback = function(Option)
         _G.SelectedField = Option
         UpdateDebug("Field changed to: " .. Option)
-        -- Force field change immediately
-        _G.CurrentFarmField = "DIFFERENT"
+        -- FORCE FIELD CHANGE - This is the key fix
+        _G.CurrentFarmField = "FORCE_CHANGE"
+        UpdateDebug("FIELD CHANGE FORCED - Will go to new field immediately")
     end,
 })
 
@@ -321,7 +331,6 @@ local AutoDigToggle = MainTab:CreateToggle({
         if Value then
             coroutine.wrap(DigLoop)()
         else
-            -- Just let the loop stop naturally
             UpdateDebug("Auto Dig disabled")
         end
     end,
@@ -337,7 +346,7 @@ local AutoFarmToggle = MainTab:CreateToggle({
         
         if Value then
             -- RESET FIELD STATE - THIS IS THE KEY FIX
-            _G.CurrentFarmField = "DIFFERENT"
+            _G.CurrentFarmField = "FORCE_CHANGE"
             _G.FarmRunning = false
             UpdateDebug("STARTING FARM - FIELD RESET")
             
@@ -402,9 +411,19 @@ local TeleportButton = SettingsTab:CreateButton({
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 hrp.CFrame = CFrame.new(fieldPos)
+                _G.CurrentFarmField = _G.SelectedField
                 UpdateDebug("MANUALLY TELEPORTED TO FIELD")
             end
         end
+    end,
+})
+
+-- Force field change button
+local ForceFieldButton = SettingsTab:CreateButton({
+    Name = "FORCE FIELD CHANGE",
+    Callback = function()
+        _G.CurrentFarmField = "FORCE_CHANGE"
+        UpdateDebug("FIELD CHANGE FORCED - Will go to new field immediately")
     end,
 })
 
@@ -429,5 +448,5 @@ Wait(2)
 ApplySpeed()
 UpdateDebug("READY - Made by sal")
 
-print("ATLAS V2 FR - FINAL VERSION LOADED")
-print("Field navigation should now work when toggling on/off")
+print("ATLAS V2 FR - FIELD SWITCH FIXED")
+print("Field switching should now work properly")
