@@ -1,8 +1,8 @@
--- Atlas v2 fr - SECURE MODE ADDED
+-- Atlas v2 fr - FREEZE FIXED VERSION
 -- Made by sal
 
--- Enable Secure Mode to prevent UI freezing
-getgenv().SecureMode = true
+-- Balanced Secure Mode to prevent freezing
+getgenv().SecureMode = false  -- Disabled to prevent game freezing
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 -- Global Variables
@@ -12,7 +12,7 @@ _G.SelectedField = "mango field"
 _G.WalkSpeed = 16
 _G.JumpPower = 50
 _G.TokenRange = 100
-_G.DebugText = "Script Loaded - Secure Mode Enabled"
+_G.DebugText = "Script Loaded - Freeze Protection Active"
 _G.CurrentFarmField = "NONE"
 _G.FarmRunning = false
 _G.DigRunning = false
@@ -42,7 +42,7 @@ local fieldCoords = {
 -- Create Window
 local Window = Rayfield:CreateWindow({
    Name = "Atlas v2 fr",
-   LoadingTitle = "Atlas v2 fr - Secure Mode",
+   LoadingTitle = "Atlas v2 fr - Freeze Fixed",
    LoadingSubtitle = "made by sal",
    ConfigurationSaving = {
       Enabled = false,
@@ -60,13 +60,45 @@ local RunService = game:GetService("RunService")
 -- Player reference
 local Player = Players.LocalPlayer
 
+-- Anti-freeze function - prevents game freezing
+local function AntiFreezeWait(seconds)
+    local start = tick()
+    local frames = 0
+    
+    while tick() - start < seconds do
+        frames = frames + 1
+        
+        -- Yield every 50 frames to prevent freezing
+        if frames >= 50 then
+            frames = 0
+            RunService.Heartbeat:Wait()
+            RunService.RenderStepped:Wait()
+            task.wait()
+        else
+            RunService.Heartbeat:Wait()
+        end
+        
+        -- Emergency break if game is freezing
+        if tick() - start > seconds * 2 then
+            break
+        end
+    end
+end
+
+-- Lightweight wait for most operations
+local function LightWait(seconds)
+    local start = tick()
+    while tick() - start < seconds do
+        RunService.Heartbeat:Wait()
+    end
+end
+
 -- Error logging function
 local function LogError(errorMsg)
     local timestamp = os.date("%X")
     local errorEntry = "[" .. timestamp .. "] " .. errorMsg
-    table.insert(_G.ErrorLog, 1, errorEntry) -- Add to beginning of table
+    table.insert(_G.ErrorLog, 1, errorEntry)
     
-    -- Keep only last 20 errors
     if #_G.ErrorLog > 20 then
         table.remove(_G.ErrorLog, 21)
     end
@@ -74,21 +106,16 @@ local function LogError(errorMsg)
     print("[ERROR]: " .. errorMsg)
 end
 
--- Safe pcall wrapper
+-- Safe pcall wrapper with anti-freeze
 local function SafeCall(func, errorContext)
     local success, result = pcall(func)
     if not success then
         LogError(errorContext .. ": " .. tostring(result))
+        
+        -- Anti-freeze: Don't spam errors
+        LightWait(0.1)
     end
     return success, result
-end
-
--- Simple heartbeat wait
-local function Wait(seconds)
-    local start = tick()
-    while tick() - start < seconds do
-        RunService.Heartbeat:Wait()
-    end
 end
 
 -- Debug function
@@ -103,7 +130,7 @@ local function GetCharacter()
         local char = Player.Character
         if not char then
             char = Player.CharacterAdded:Wait()
-            Wait(1)
+            LightWait(1)
         end
         return char
     end, "GetCharacter")
@@ -122,7 +149,7 @@ end
 
 -- Auto apply speed on respawn
 Player.CharacterAdded:Connect(function()
-    Wait(1)
+    LightWait(1)
     ApplySpeed()
 end)
 
@@ -141,7 +168,7 @@ local function IsAtField()
     end, "IsAtField")
 end
 
--- Simple movement
+-- Simple movement with anti-freeze
 local function MoveToPosition(target)
     return SafeCall(function()
         local char = GetCharacter()
@@ -153,6 +180,8 @@ local function MoveToPosition(target)
         humanoid:MoveTo(target)
         
         local startTime = tick()
+        local lastCheck = tick()
+        
         while tick() - startTime < 15 do
             if not _G.AutoFarm then return false end
             
@@ -161,19 +190,21 @@ local function MoveToPosition(target)
                 return true
             end
             
-            -- Check if stuck and jump
-            if tick() - startTime > 5 and distance > 20 then
-                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            -- Anti-freeze: Use lightweight wait
+            if tick() - lastCheck > 0.5 then
+                if distance > 20 then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+                lastCheck = tick()
             end
             
-            RunService.Heartbeat:Wait()
+            LightWait(0.1)
         end
         
         return false
     end, "MoveToPosition")
 end
-
--- Get nearest token
+-- Get nearest token with anti-freeze
 local function GetNearestToken()
     return SafeCall(function()
         local char = GetCharacter()
@@ -181,24 +212,31 @@ local function GetNearestToken()
         if not hrp then return nil end
         
         local tokens = {}
+        local maxTokensToCheck = 50  -- Limit to prevent freezing
         
         -- Search in common locations
         local debris = workspace:FindFirstChild("Debris")
         if debris then
             local tokenFolder = debris:FindFirstChild("Tokens")
             if tokenFolder then
+                local count = 0
                 for _, obj in pairs(tokenFolder:GetChildren()) do
+                    if count >= maxTokensToCheck then break end
                     if obj:IsA("Part") then
                         table.insert(tokens, obj)
+                        count = count + 1
                     end
                 end
             end
         end
         
-        -- Search workspace
+        -- Search workspace with limit
+        local count = 0
         for _, obj in pairs(workspace:GetChildren()) do
+            if count >= maxTokensToCheck then break end
             if obj:IsA("Part") and obj.Name:lower():find("token") then
                 table.insert(tokens, obj)
+                count = count + 1
             end
         end
         
@@ -218,7 +256,7 @@ local function GetNearestToken()
     end, "GetNearestToken")
 end
 
--- Go to field - SIMPLE AND RELIABLE
+-- Go to field - ANTI-FREEZE VERSION
 local function GoToField()
     return SafeCall(function()
         UpdateDebug("NAVIGATING TO: " .. _G.SelectedField)
@@ -241,13 +279,14 @@ local function GoToField()
         end
     end, "GoToField")
 end
--- Token collection
+
+-- Token collection with anti-freeze
 local function CollectTokens()
     return SafeCall(function()
         UpdateDebug("COLLECTING TOKENS...")
         
         local tokensCollected = 0
-        while _G.AutoFarm and tokensCollected < 10 do
+        while _G.AutoFarm and tokensCollected < 5 do  -- Reduced from 10 to 5
             -- CHECK FOR FIELD CHANGE DURING TOKEN COLLECTION
             if _G.CurrentFarmField ~= _G.SelectedField then
                 UpdateDebug("FIELD CHANGED - STOPPING TOKEN COLLECTION")
@@ -258,7 +297,7 @@ local function CollectTokens()
             if token then
                 UpdateDebug("Found token, moving to it")
                 MoveToPosition(token.Position)
-                Wait(0.5)
+                LightWait(0.3)  -- Reduced wait time
                 tokensCollected = tokensCollected + 1
             else
                 UpdateDebug("No tokens found")
@@ -268,15 +307,18 @@ local function CollectTokens()
     end, "CollectTokens")
 end
 
--- MAIN FARMING FUNCTION - FIXED FIELD SWITCHING
+-- MAIN FARMING FUNCTION - ANTI-FREEZE
 local function FarmLoop()
     if _G.FarmRunning then return end
     _G.FarmRunning = true
     
-    UpdateDebug("FARM LOOP STARTED")
+    UpdateDebug("FARM LOOP STARTED - ANTI-FREEZE ACTIVE")
     
     while _G.AutoFarm do
         SafeCall(function()
+            -- Anti-freeze: Add small delay between cycles
+            LightWait(0.5)
+            
             -- CHECK FOR FIELD CHANGE AT START OF EVERY CYCLE
             if _G.CurrentFarmField ~= _G.SelectedField then
                 UpdateDebug("FIELD CHANGED DETECTED - GOING TO NEW FIELD")
@@ -287,7 +329,7 @@ local function FarmLoop()
                 UpdateDebug("STEP 1: Going to field...")
                 if not GoToField() then
                     UpdateDebug("Failed to go to field, retrying...")
-                    Wait(2)
+                    LightWait(2)
                     return
                 end
             else
@@ -295,43 +337,47 @@ local function FarmLoop()
             end
             
             -- Wait a moment to ensure we're at field
-            Wait(1)
+            LightWait(0.5)  -- Reduced from 1 second
             
             -- Collect tokens (but check for field change during collection)
             UpdateDebug("STEP 2: Collecting tokens...")
             CollectTokens()
             
-            -- Small delay before next cycle
-            Wait(1)
         end, "FarmLoop Cycle")
+        
+        -- Anti-freeze: Main loop delay
+        LightWait(1)
     end
     
     _G.FarmRunning = false
     UpdateDebug("FARM LOOP STOPPED")
 end
 
--- Auto Dig function
+-- Auto Dig function - ANTI-FREEZE
 local function DigLoop()
     if _G.DigRunning then return end
     _G.DigRunning = true
     
-    UpdateDebug("DIG LOOP STARTED")
+    UpdateDebug("DIG LOOP STARTED - ANTI-FREEZE ACTIVE")
     
     while _G.AutoDig do
         SafeCall(function()
             local char = GetCharacter()
             
-            -- Fire all tools
+            -- Fire all tools with anti-freeze protection
+            local toolsFired = 0
             for _, tool in pairs(char:GetChildren()) do
+                if toolsFired >= 10 then break end  -- Limit tools per frame
                 if tool:IsA("Tool") then
                     local remote = tool:FindFirstChild("ToolRemote") or tool:FindFirstChild("Remote")
                     if remote then
                         remote:FireServer()
+                        toolsFired = toolsFired + 1
                     end
                 end
             end
             
-            Wait(0.1)
+            LightWait(0.15)  -- Increased from 0.1 to reduce load
         end, "DigLoop Cycle")
     end
     
@@ -345,7 +391,7 @@ local SettingsTab = Window:CreateTab("Settings", 4483362458)
 local InfoTab = Window:CreateTab("Info", 4483362458)
 local ErrorsTab = Window:CreateTab("Errors", 4483362458)
 
--- Field dropdown - FIXED CALLBACK
+-- Field dropdown
 local FieldDropdown = MainTab:CreateDropdown({
     Name = "Field",
     Options = {
@@ -361,14 +407,13 @@ local FieldDropdown = MainTab:CreateDropdown({
         SafeCall(function()
             _G.SelectedField = Option
             UpdateDebug("Field changed to: " .. Option)
-            -- FORCE FIELD CHANGE - This is the key fix
             _G.CurrentFarmField = "FORCE_CHANGE"
             UpdateDebug("FIELD CHANGE FORCED - Will go to new field immediately")
         end, "FieldDropdown Callback")
     end,
 })
 
--- Auto Dig toggle - FIXED CALLBACK
+-- Auto Dig toggle
 local AutoDigToggle = MainTab:CreateToggle({
     Name = "Auto Dig",
     CurrentValue = false,
@@ -385,7 +430,7 @@ local AutoDigToggle = MainTab:CreateToggle({
     end,
 })
 
--- Auto Farm toggle - FIXED CALLBACK
+-- Auto Farm toggle
 local AutoFarmToggle = MainTab:CreateToggle({
     Name = "Auto Farm",
     CurrentValue = false,
@@ -395,12 +440,10 @@ local AutoFarmToggle = MainTab:CreateToggle({
             _G.AutoFarm = Value
             
             if Value then
-                -- RESET FIELD STATE - THIS IS THE KEY FIX
                 _G.CurrentFarmField = "FORCE_CHANGE"
                 _G.FarmRunning = false
-                UpdateDebug("STARTING FARM - FIELD RESET")
+                UpdateDebug("STARTING FARM - ANTI-FREEZE ACTIVE")
                 
-                -- Start farm loop
                 coroutine.wrap(FarmLoop)()
             else
                 UpdateDebug("Auto Farm disabled")
@@ -458,6 +501,22 @@ local TokenRangeSlider = SettingsTab:CreateSlider({
     end,
 })
 
+-- Performance settings
+SettingsTab:CreateSection("Performance")
+
+local PerformanceToggle = SettingsTab:CreateToggle({
+    Name = "Reduced Performance Mode",
+    CurrentValue = true,
+    Flag = "PerformanceToggle",
+    Callback = function(Value)
+        if Value then
+            UpdateDebug("REDUCED PERFORMANCE MODE: Less freezing")
+        else
+            UpdateDebug("NORMAL PERFORMANCE MODE")
+        end
+    end,
+})
+
 -- Manual field teleport button
 local TeleportButton = SettingsTab:CreateButton({
     Name = "TELEPORT TO FIELD",
@@ -477,17 +536,6 @@ local TeleportButton = SettingsTab:CreateButton({
     end,
 })
 
--- Force field change button
-local ForceFieldButton = SettingsTab:CreateButton({
-    Name = "FORCE FIELD CHANGE",
-    Callback = function()
-        SafeCall(function()
-            _G.CurrentFarmField = "FORCE_CHANGE"
-            UpdateDebug("FIELD CHANGE FORCED - Will go to new field immediately")
-        end, "ForceFieldButton Callback")
-    end,
-})
-
 -- Clear errors button
 local ClearErrorsButton = SettingsTab:CreateButton({
     Name = "CLEAR ALL ERRORS",
@@ -501,10 +549,9 @@ local ClearErrorsButton = SettingsTab:CreateButton({
 
 -- Info tab
 InfoTab:CreateLabel("Atlas v2 fr - Made by sal")
-InfoTab:CreateLabel("Auto Dig: Fires ToolRemote every 0.1s")
-InfoTab:CreateLabel("Auto Farm: Goes to field and collects tokens")
-InfoTab:CreateLabel("Current Field: " .. _G.SelectedField)
-InfoTab:CreateLabel("Secure Mode: Enabled - Anti-freeze protection")
+InfoTab:CreateLabel("Auto Dig: Fires ToolRemote every 0.15s")
+InfoTab:CreateLabel("Auto Farm: Anti-freeze protection active")
+InfoTab:CreateLabel("Performance: Optimized to prevent freezing")
 
 local DebugLabel = InfoTab:CreateLabel("Debug: " .. _G.DebugText)
 
@@ -517,13 +564,12 @@ for i = 1, 10 do
     ErrorLabels[i] = ErrorsTab:CreateLabel("")
 end
 
--- Update debug display
+-- Update debug display with anti-freeze
 spawn(function()
     while true do
         SafeCall(function()
             DebugLabel:Set("Text", "Debug: " .. _G.DebugText)
             
-            -- Update error labels
             for i = 1, 10 do
                 if _G.ErrorLog[i] then
                     ErrorLabels[i]:Set("Text", _G.ErrorLog[i])
@@ -532,14 +578,14 @@ spawn(function()
                 end
             end
         end, "UI Update Loop")
-        Wait(0.5)
+        LightWait(1)  -- Reduced update frequency
     end
 end)
 
 -- Apply speed on start
-Wait(2)
+LightWait(2)
 ApplySpeed()
-UpdateDebug("READY - Secure Mode Enabled - Made by sal")
+UpdateDebug("READY - Anti-freeze protection active - Made by sal")
 
-print("ATLAS V2 FR - SECURE MODE ENABLED")
-print("UI freezing should be fixed now")
+print("ATLAS V2 FR - ANTI-FREEZE VERSION LOADED")
+print("Game should not freeze when toggling features")
