@@ -1,6 +1,8 @@
--- Atlas v2 fr - ERRORS TAB ADDED
+-- Atlas v2 fr - SECURE MODE ADDED
 -- Made by sal
 
+-- Enable Secure Mode to prevent UI freezing
+getgenv().SecureMode = true
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 -- Global Variables
@@ -10,7 +12,7 @@ _G.SelectedField = "mango field"
 _G.WalkSpeed = 16
 _G.JumpPower = 50
 _G.TokenRange = 100
-_G.DebugText = "Script Loaded"
+_G.DebugText = "Script Loaded - Secure Mode Enabled"
 _G.CurrentFarmField = "NONE"
 _G.FarmRunning = false
 _G.DigRunning = false
@@ -40,7 +42,7 @@ local fieldCoords = {
 -- Create Window
 local Window = Rayfield:CreateWindow({
    Name = "Atlas v2 fr",
-   LoadingTitle = "Atlas v2 fr",
+   LoadingTitle = "Atlas v2 fr - Secure Mode",
    LoadingSubtitle = "made by sal",
    ConfigurationSaving = {
       Enabled = false,
@@ -341,7 +343,7 @@ end
 local MainTab = Window:CreateTab("Main", 4483362458)
 local SettingsTab = Window:CreateTab("Settings", 4483362458)
 local InfoTab = Window:CreateTab("Info", 4483362458)
-local ErrorsTab = Window:CreateTab("Errors", 4483362458) -- NEW ERRORS TAB
+local ErrorsTab = Window:CreateTab("Errors", 4483362458)
 
 -- Field dropdown - FIXED CALLBACK
 local FieldDropdown = MainTab:CreateDropdown({
@@ -502,6 +504,7 @@ InfoTab:CreateLabel("Atlas v2 fr - Made by sal")
 InfoTab:CreateLabel("Auto Dig: Fires ToolRemote every 0.1s")
 InfoTab:CreateLabel("Auto Farm: Goes to field and collects tokens")
 InfoTab:CreateLabel("Current Field: " .. _G.SelectedField)
+InfoTab:CreateLabel("Secure Mode: Enabled - Anti-freeze protection")
 
 local DebugLabel = InfoTab:CreateLabel("Debug: " .. _G.DebugText)
 
@@ -536,7 +539,7 @@ end)
 -- Apply speed on start
 Wait(2)
 ApplySpeed()
-UpdateDebug("READY - Made by sal")
+UpdateDebug("READY - Secure Mode Enabled - Made by sal")
 
-print("ATLAS V2 FR - ERRORS TAB ADDED")
-print("All callbacks are now safe and errors are logged")
+print("ATLAS V2 FR - SECURE MODE ENABLED")
+print("UI freezing should be fixed now")
