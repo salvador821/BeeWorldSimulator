@@ -1,4 +1,4 @@
--- Atlas v2 fr - FIELD SWITCH FIXED
+-- Atlas v2 fr - ERRORS TAB ADDED
 -- Made by sal
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -14,6 +14,7 @@ _G.DebugText = "Script Loaded"
 _G.CurrentFarmField = "NONE"
 _G.FarmRunning = false
 _G.DigRunning = false
+_G.ErrorLog = {}
 
 -- Field coordinates table
 local fieldCoords = {
@@ -57,6 +58,29 @@ local RunService = game:GetService("RunService")
 -- Player reference
 local Player = Players.LocalPlayer
 
+-- Error logging function
+local function LogError(errorMsg)
+    local timestamp = os.date("%X")
+    local errorEntry = "[" .. timestamp .. "] " .. errorMsg
+    table.insert(_G.ErrorLog, 1, errorEntry) -- Add to beginning of table
+    
+    -- Keep only last 20 errors
+    if #_G.ErrorLog > 20 then
+        table.remove(_G.ErrorLog, 21)
+    end
+    
+    print("[ERROR]: " .. errorMsg)
+end
+
+-- Safe pcall wrapper
+local function SafeCall(func, errorContext)
+    local success, result = pcall(func)
+    if not success then
+        LogError(errorContext .. ": " .. tostring(result))
+    end
+    return success, result
+end
+
 -- Simple heartbeat wait
 local function Wait(seconds)
     local start = tick()
@@ -73,21 +97,25 @@ end
 
 -- Get character
 local function GetCharacter()
-    local char = Player.Character
-    if not char then
-        char = Player.CharacterAdded:Wait()
-        Wait(1)
-    end
-    return char
+    return SafeCall(function()
+        local char = Player.Character
+        if not char then
+            char = Player.CharacterAdded:Wait()
+            Wait(1)
+        end
+        return char
+    end, "GetCharacter")
 end
 
 -- Apply speed
 local function ApplySpeed()
-    local char = GetCharacter()
-    if char and char:FindFirstChild("Humanoid") then
-        char.Humanoid.WalkSpeed = _G.WalkSpeed
-        char.Humanoid.JumpPower = _G.JumpPower
-    end
+    SafeCall(function()
+        local char = GetCharacter()
+        if char and char:FindFirstChild("Humanoid") then
+            char.Humanoid.WalkSpeed = _G.WalkSpeed
+            char.Humanoid.JumpPower = _G.JumpPower
+        end
+    end, "ApplySpeed")
 end
 
 -- Auto apply speed on respawn
@@ -98,134 +126,144 @@ end)
 
 -- Check if at field
 local function IsAtField()
-    local char = GetCharacter()
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-    
-    local fieldPos = fieldCoords[_G.SelectedField]
-    if not fieldPos then return false end
-    
-    local distance = (hrp.Position - fieldPos).Magnitude
-    return distance < 50
+    return SafeCall(function()
+        local char = GetCharacter()
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return false end
+        
+        local fieldPos = fieldCoords[_G.SelectedField]
+        if not fieldPos then return false end
+        
+        local distance = (hrp.Position - fieldPos).Magnitude
+        return distance < 50
+    end, "IsAtField")
 end
 
 -- Simple movement
 local function MoveToPosition(target)
-    local char = GetCharacter()
-    local humanoid = char:FindFirstChild("Humanoid")
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    
-    if not humanoid or not hrp then return false end
-    
-    humanoid:MoveTo(target)
-    
-    local startTime = tick()
-    while tick() - startTime < 15 do
-        if not _G.AutoFarm then return false end
+    return SafeCall(function()
+        local char = GetCharacter()
+        local humanoid = char:FindFirstChild("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
         
-        local distance = (hrp.Position - target).Magnitude
-        if distance < 10 then
-            return true
+        if not humanoid or not hrp then return false end
+        
+        humanoid:MoveTo(target)
+        
+        local startTime = tick()
+        while tick() - startTime < 15 do
+            if not _G.AutoFarm then return false end
+            
+            local distance = (hrp.Position - target).Magnitude
+            if distance < 10 then
+                return true
+            end
+            
+            -- Check if stuck and jump
+            if tick() - startTime > 5 and distance > 20 then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+            
+            RunService.Heartbeat:Wait()
         end
         
-        -- Check if stuck and jump
-        if tick() - startTime > 5 and distance > 20 then
-            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
-        
-        RunService.Heartbeat:Wait()
-    end
-    
-    return false
+        return false
+    end, "MoveToPosition")
 end
 
 -- Get nearest token
 local function GetNearestToken()
-    local char = GetCharacter()
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
-    
-    local tokens = {}
-    
-    -- Search in common locations
-    local debris = workspace:FindFirstChild("Debris")
-    if debris then
-        local tokenFolder = debris:FindFirstChild("Tokens")
-        if tokenFolder then
-            for _, obj in pairs(tokenFolder:GetChildren()) do
-                if obj:IsA("Part") then
-                    table.insert(tokens, obj)
+    return SafeCall(function()
+        local char = GetCharacter()
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return nil end
+        
+        local tokens = {}
+        
+        -- Search in common locations
+        local debris = workspace:FindFirstChild("Debris")
+        if debris then
+            local tokenFolder = debris:FindFirstChild("Tokens")
+            if tokenFolder then
+                for _, obj in pairs(tokenFolder:GetChildren()) do
+                    if obj:IsA("Part") then
+                        table.insert(tokens, obj)
+                    end
                 end
             end
         end
-    end
-    
-    -- Search workspace
-    for _, obj in pairs(workspace:GetChildren()) do
-        if obj:IsA("Part") and obj.Name:lower():find("token") then
-            table.insert(tokens, obj)
+        
+        -- Search workspace
+        for _, obj in pairs(workspace:GetChildren()) do
+            if obj:IsA("Part") and obj.Name:lower():find("token") then
+                table.insert(tokens, obj)
+            end
         end
-    end
-    
-    -- Find closest
-    local closest = nil
-    local closestDist = math.huge
-    
-    for _, token in pairs(tokens) do
-        local dist = (token.Position - hrp.Position).Magnitude
-        if dist < _G.TokenRange and dist < closestDist then
-            closest = token
-            closestDist = dist
+        
+        -- Find closest
+        local closest = nil
+        local closestDist = math.huge
+        
+        for _, token in pairs(tokens) do
+            local dist = (token.Position - hrp.Position).Magnitude
+            if dist < _G.TokenRange and dist < closestDist then
+                closest = token
+                closestDist = dist
+            end
         end
-    end
-    
-    return closest
+        
+        return closest
+    end, "GetNearestToken")
 end
 
 -- Go to field - SIMPLE AND RELIABLE
 local function GoToField()
-    UpdateDebug("NAVIGATING TO: " .. _G.SelectedField)
-    
-    local fieldPos = fieldCoords[_G.SelectedField]
-    if not fieldPos then
-        UpdateDebug("ERROR: Invalid field position")
-        return false
-    end
-    
-    local success = MoveToPosition(fieldPos)
-    
-    if success then
-        _G.CurrentFarmField = _G.SelectedField
-        UpdateDebug("SUCCESS: Arrived at " .. _G.SelectedField)
-        return true
-    else
-        UpdateDebug("FAILED: Could not reach field")
-        return false
-    end
+    return SafeCall(function()
+        UpdateDebug("NAVIGATING TO: " .. _G.SelectedField)
+        
+        local fieldPos = fieldCoords[_G.SelectedField]
+        if not fieldPos then
+            UpdateDebug("ERROR: Invalid field position")
+            return false
+        end
+        
+        local success = MoveToPosition(fieldPos)
+        
+        if success then
+            _G.CurrentFarmField = _G.SelectedField
+            UpdateDebug("SUCCESS: Arrived at " .. _G.SelectedField)
+            return true
+        else
+            UpdateDebug("FAILED: Could not reach field")
+            return false
+        end
+    end, "GoToField")
 end
 -- Token collection
 local function CollectTokens()
-    UpdateDebug("COLLECTING TOKENS...")
-    
-    local tokensCollected = 0
-    while _G.AutoFarm and tokensCollected < 10 do
-        -- CHECK FOR FIELD CHANGE DURING TOKEN COLLECTION
-        if _G.CurrentFarmField ~= _G.SelectedField then
-            UpdateDebug("FIELD CHANGED - STOPPING TOKEN COLLECTION")
-            return
-        end
+    return SafeCall(function()
+        UpdateDebug("COLLECTING TOKENS...")
         
-        local token = GetNearestToken()
-        if token then
-            UpdateDebug("Found token, moving to it")
-            MoveToPosition(token.Position)
-            Wait(0.5)
-            tokensCollected = tokensCollected + 1
-        else
-            UpdateDebug("No tokens found")
-            break
+        local tokensCollected = 0
+        while _G.AutoFarm and tokensCollected < 10 do
+            -- CHECK FOR FIELD CHANGE DURING TOKEN COLLECTION
+            if _G.CurrentFarmField ~= _G.SelectedField then
+                UpdateDebug("FIELD CHANGED - STOPPING TOKEN COLLECTION")
+                return
+            end
+            
+            local token = GetNearestToken()
+            if token then
+                UpdateDebug("Found token, moving to it")
+                MoveToPosition(token.Position)
+                Wait(0.5)
+                tokensCollected = tokensCollected + 1
+            else
+                UpdateDebug("No tokens found")
+                break
+            end
         end
-    end
+    end, "CollectTokens")
 end
 
 -- MAIN FARMING FUNCTION - FIXED FIELD SWITCHING
@@ -236,32 +274,34 @@ local function FarmLoop()
     UpdateDebug("FARM LOOP STARTED")
     
     while _G.AutoFarm do
-        -- CHECK FOR FIELD CHANGE AT START OF EVERY CYCLE
-        if _G.CurrentFarmField ~= _G.SelectedField then
-            UpdateDebug("FIELD CHANGED DETECTED - GOING TO NEW FIELD")
-        end
-        
-        -- ALWAYS go to field first if we're not at the correct field
-        if _G.CurrentFarmField ~= _G.SelectedField or not IsAtField() then
-            UpdateDebug("STEP 1: Going to field...")
-            if not GoToField() then
-                UpdateDebug("Failed to go to field, retrying...")
-                Wait(2)
-                continue
+        SafeCall(function()
+            -- CHECK FOR FIELD CHANGE AT START OF EVERY CYCLE
+            if _G.CurrentFarmField ~= _G.SelectedField then
+                UpdateDebug("FIELD CHANGED DETECTED - GOING TO NEW FIELD")
             end
-        else
-            UpdateDebug("Already at correct field, collecting tokens...")
-        end
-        
-        -- Wait a moment to ensure we're at field
-        Wait(1)
-        
-        -- Collect tokens (but check for field change during collection)
-        UpdateDebug("STEP 2: Collecting tokens...")
-        CollectTokens()
-        
-        -- Small delay before next cycle
-        Wait(1)
+            
+            -- ALWAYS go to field first if we're not at the correct field
+            if _G.CurrentFarmField ~= _G.SelectedField or not IsAtField() then
+                UpdateDebug("STEP 1: Going to field...")
+                if not GoToField() then
+                    UpdateDebug("Failed to go to field, retrying...")
+                    Wait(2)
+                    return
+                end
+            else
+                UpdateDebug("Already at correct field, collecting tokens...")
+            end
+            
+            -- Wait a moment to ensure we're at field
+            Wait(1)
+            
+            -- Collect tokens (but check for field change during collection)
+            UpdateDebug("STEP 2: Collecting tokens...")
+            CollectTokens()
+            
+            -- Small delay before next cycle
+            Wait(1)
+        end, "FarmLoop Cycle")
     end
     
     _G.FarmRunning = false
@@ -276,19 +316,21 @@ local function DigLoop()
     UpdateDebug("DIG LOOP STARTED")
     
     while _G.AutoDig do
-        local char = GetCharacter()
-        
-        -- Fire all tools
-        for _, tool in pairs(char:GetChildren()) do
-            if tool:IsA("Tool") then
-                local remote = tool:FindFirstChild("ToolRemote") or tool:FindFirstChild("Remote")
-                if remote then
-                    remote:FireServer()
+        SafeCall(function()
+            local char = GetCharacter()
+            
+            -- Fire all tools
+            for _, tool in pairs(char:GetChildren()) do
+                if tool:IsA("Tool") then
+                    local remote = tool:FindFirstChild("ToolRemote") or tool:FindFirstChild("Remote")
+                    if remote then
+                        remote:FireServer()
+                    end
                 end
             end
-        end
-        
-        Wait(0.1)
+            
+            Wait(0.1)
+        end, "DigLoop Cycle")
     end
     
     _G.DigRunning = false
@@ -299,8 +341,9 @@ end
 local MainTab = Window:CreateTab("Main", 4483362458)
 local SettingsTab = Window:CreateTab("Settings", 4483362458)
 local InfoTab = Window:CreateTab("Info", 4483362458)
+local ErrorsTab = Window:CreateTab("Errors", 4483362458) -- NEW ERRORS TAB
 
--- Field dropdown - FIXED FIELD SWITCHING
+-- Field dropdown - FIXED CALLBACK
 local FieldDropdown = MainTab:CreateDropdown({
     Name = "Field",
     Options = {
@@ -313,48 +356,54 @@ local FieldDropdown = MainTab:CreateDropdown({
     CurrentOption = "mango field",
     Flag = "FieldDropdown",
     Callback = function(Option)
-        _G.SelectedField = Option
-        UpdateDebug("Field changed to: " .. Option)
-        -- FORCE FIELD CHANGE - This is the key fix
-        _G.CurrentFarmField = "FORCE_CHANGE"
-        UpdateDebug("FIELD CHANGE FORCED - Will go to new field immediately")
+        SafeCall(function()
+            _G.SelectedField = Option
+            UpdateDebug("Field changed to: " .. Option)
+            -- FORCE FIELD CHANGE - This is the key fix
+            _G.CurrentFarmField = "FORCE_CHANGE"
+            UpdateDebug("FIELD CHANGE FORCED - Will go to new field immediately")
+        end, "FieldDropdown Callback")
     end,
 })
 
--- Auto Dig toggle
+-- Auto Dig toggle - FIXED CALLBACK
 local AutoDigToggle = MainTab:CreateToggle({
     Name = "Auto Dig",
     CurrentValue = false,
     Flag = "AutoDigToggle",
     Callback = function(Value)
-        _G.AutoDig = Value
-        if Value then
-            coroutine.wrap(DigLoop)()
-        else
-            UpdateDebug("Auto Dig disabled")
-        end
+        SafeCall(function()
+            _G.AutoDig = Value
+            if Value then
+                coroutine.wrap(DigLoop)()
+            else
+                UpdateDebug("Auto Dig disabled")
+            end
+        end, "AutoDigToggle Callback")
     end,
 })
 
--- Auto Farm toggle - FIXED
+-- Auto Farm toggle - FIXED CALLBACK
 local AutoFarmToggle = MainTab:CreateToggle({
     Name = "Auto Farm",
     CurrentValue = false,
     Flag = "AutoFarmToggle",
     Callback = function(Value)
-        _G.AutoFarm = Value
-        
-        if Value then
-            -- RESET FIELD STATE - THIS IS THE KEY FIX
-            _G.CurrentFarmField = "FORCE_CHANGE"
-            _G.FarmRunning = false
-            UpdateDebug("STARTING FARM - FIELD RESET")
+        SafeCall(function()
+            _G.AutoFarm = Value
             
-            -- Start farm loop
-            coroutine.wrap(FarmLoop)()
-        else
-            UpdateDebug("Auto Farm disabled")
-        end
+            if Value then
+                -- RESET FIELD STATE - THIS IS THE KEY FIX
+                _G.CurrentFarmField = "FORCE_CHANGE"
+                _G.FarmRunning = false
+                UpdateDebug("STARTING FARM - FIELD RESET")
+                
+                -- Start farm loop
+                coroutine.wrap(FarmLoop)()
+            else
+                UpdateDebug("Auto Farm disabled")
+            end
+        end, "AutoFarmToggle Callback")
     end,
 })
 
@@ -369,8 +418,10 @@ local WalkSpeedSlider = SettingsTab:CreateSlider({
     CurrentValue = 16,
     Flag = "WalkSpeedSlider",
     Callback = function(Value)
-        _G.WalkSpeed = Value
-        ApplySpeed()
+        SafeCall(function()
+            _G.WalkSpeed = Value
+            ApplySpeed()
+        end, "WalkSpeedSlider Callback")
     end,
 })
 
@@ -382,8 +433,10 @@ local JumpPowerSlider = SettingsTab:CreateSlider({
     CurrentValue = 50,
     Flag = "JumpPowerSlider",
     Callback = function(Value)
-        _G.JumpPower = Value
-        ApplySpeed()
+        SafeCall(function()
+            _G.JumpPower = Value
+            ApplySpeed()
+        end, "JumpPowerSlider Callback")
     end,
 })
 
@@ -397,7 +450,9 @@ local TokenRangeSlider = SettingsTab:CreateSlider({
     CurrentValue = 100,
     Flag = "TokenRangeSlider",
     Callback = function(Value)
-        _G.TokenRange = Value
+        SafeCall(function()
+            _G.TokenRange = Value
+        end, "TokenRangeSlider Callback")
     end,
 })
 
@@ -405,16 +460,18 @@ local TokenRangeSlider = SettingsTab:CreateSlider({
 local TeleportButton = SettingsTab:CreateButton({
     Name = "TELEPORT TO FIELD",
     Callback = function()
-        local fieldPos = fieldCoords[_G.SelectedField]
-        if fieldPos then
-            local char = GetCharacter()
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                hrp.CFrame = CFrame.new(fieldPos)
-                _G.CurrentFarmField = _G.SelectedField
-                UpdateDebug("MANUALLY TELEPORTED TO FIELD")
+        SafeCall(function()
+            local fieldPos = fieldCoords[_G.SelectedField]
+            if fieldPos then
+                local char = GetCharacter()
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.CFrame = CFrame.new(fieldPos)
+                    _G.CurrentFarmField = _G.SelectedField
+                    UpdateDebug("MANUALLY TELEPORTED TO FIELD")
+                end
             end
-        end
+        end, "TeleportButton Callback")
     end,
 })
 
@@ -422,8 +479,21 @@ local TeleportButton = SettingsTab:CreateButton({
 local ForceFieldButton = SettingsTab:CreateButton({
     Name = "FORCE FIELD CHANGE",
     Callback = function()
-        _G.CurrentFarmField = "FORCE_CHANGE"
-        UpdateDebug("FIELD CHANGE FORCED - Will go to new field immediately")
+        SafeCall(function()
+            _G.CurrentFarmField = "FORCE_CHANGE"
+            UpdateDebug("FIELD CHANGE FORCED - Will go to new field immediately")
+        end, "ForceFieldButton Callback")
+    end,
+})
+
+-- Clear errors button
+local ClearErrorsButton = SettingsTab:CreateButton({
+    Name = "CLEAR ALL ERRORS",
+    Callback = function()
+        SafeCall(function()
+            _G.ErrorLog = {}
+            UpdateDebug("All errors cleared")
+        end, "ClearErrorsButton Callback")
     end,
 })
 
@@ -435,10 +505,30 @@ InfoTab:CreateLabel("Current Field: " .. _G.SelectedField)
 
 local DebugLabel = InfoTab:CreateLabel("Debug: " .. _G.DebugText)
 
+-- Errors tab
+ErrorsTab:CreateLabel("Recent Errors (Latest First):")
+ErrorsTab:CreateLabel("Send these errors to sal for fixing:")
+
+local ErrorLabels = {}
+for i = 1, 10 do
+    ErrorLabels[i] = ErrorsTab:CreateLabel("")
+end
+
 -- Update debug display
 spawn(function()
     while true do
-        DebugLabel:Set("Text", "Debug: " .. _G.DebugText)
+        SafeCall(function()
+            DebugLabel:Set("Text", "Debug: " .. _G.DebugText)
+            
+            -- Update error labels
+            for i = 1, 10 do
+                if _G.ErrorLog[i] then
+                    ErrorLabels[i]:Set("Text", _G.ErrorLog[i])
+                else
+                    ErrorLabels[i]:Set("Text", "")
+                end
+            end
+        end, "UI Update Loop")
         Wait(0.5)
     end
 end)
@@ -448,5 +538,5 @@ Wait(2)
 ApplySpeed()
 UpdateDebug("READY - Made by sal")
 
-print("ATLAS V2 FR - FIELD SWITCH FIXED")
-print("Field switching should now work properly")
+print("ATLAS V2 FR - ERRORS TAB ADDED")
+print("All callbacks are now safe and errors are logged")
