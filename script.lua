@@ -1,4 +1,4 @@
--- Atlas v2 fr - Complete Rewrite
+-- Atlas v2 fr - Heartbeat Edition
 -- Made by sal
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -15,11 +15,6 @@ _G.CurrentFarmField = nil
 _G.FarmTask = nil
 _G.DigTask = nil
 _G.IsMovingToField = false
-_G.FieldCheckCounter = 0
-_G.TokenCheckCounter = 0
-_G.LastFieldPosition = nil
-_G.PathfindingAttempts = 0
-_G.MaxPathfindingAttempts = 5
 
 -- Field coordinates table
 local fieldCoords = {
@@ -65,27 +60,35 @@ local Players = game:GetService("Players")
 local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 
 -- Player reference
 local Player = Players.LocalPlayer
+
+-- New Heartbeat-based wait function
+local function HeartbeatWait(seconds)
+    local start = os.clock()
+    while os.clock() - start < seconds do
+        RunService.Heartbeat:Wait()
+        if not _G.AutoFarm and not _G.AutoDig then
+            return false
+        end
+    end
+    return true
+end
+
+-- Quick wait function for small delays
+local function QuickWait(seconds)
+    local start = os.clock()
+    while os.clock() - start < seconds do
+        RunService.Heartbeat:Wait()
+    end
+    return true
+end
 
 -- Debug logging function
 local function UpdateDebug(message)
     _G.DebugText = message
     print("[Atlas Debug]: " .. message)
-end
-
--- Safe wait function
-local function SafeWait(seconds)
-    local start = tick()
-    while tick() - start < seconds do
-        if not _G.AutoFarm and not _G.AutoDig then
-            return false
-        end
-        RunService.Heartbeat:Wait()
-    end
-    return true
 end
 
 -- Character safety function
@@ -94,7 +97,7 @@ local function GetCharacter()
     if not character then
         UpdateDebug("Waiting for character to spawn...")
         character = Player.CharacterAdded:Wait()
-        SafeWait(2) -- Wait for character to fully load
+        QuickWait(2) -- Wait for character to fully load
     end
     
     if character then
@@ -105,7 +108,7 @@ local function GetCharacter()
             return character, humanoid, hrp
         else
             UpdateDebug("Character not ready or dead, waiting...")
-            SafeWait(3)
+            QuickWait(3)
             return GetCharacter()
         end
     end
@@ -132,103 +135,48 @@ end
 
 -- Auto-apply stats on character spawn
 Player.CharacterAdded:Connect(function(character)
-    SafeWait(2)
+    QuickWait(2)
     ApplyCharacterStats()
 end)
 
--- Apply on script start
-task.spawn(function()
-    SafeWait(3)
-    ApplyCharacterStats()
-end)
-
--- Enhanced pathfinding function
-local function MoveToPosition(targetPosition, options)
-    options = options or {}
-    local maxRetries = options.maxRetries or 3
-    local timeout = options.timeout or 8
-    local purpose = options.purpose or "unknown"
-    
+-- Simple movement function
+local function SimpleMoveTo(targetPosition)
     return pcall(function()
         local character, humanoid, hrp = GetCharacter()
-        if not character then
-            error("No character found")
-        end
+        if not character then return false end
         
-        UpdateDebug("Pathfinding to " .. purpose .. "...")
+        humanoid:MoveTo(targetPosition)
         
-        local pathParams = {
-            AgentRadius = 2,
-            AgentHeight = 5,
-            AgentCanJump = true,
-            AgentCanClimb = true,
-            WaypointSpacing = 4,
-        }
+        -- Wait for movement with heartbeat
+        local startTime = os.clock()
+        local lastPosition = hrp.Position
+        local stuckCount = 0
         
-        local path = PathfindingService:CreatePath(pathParams)
-        local computeSuccess = pcall(function()
-            path:ComputeAsync(hrp.Position, targetPosition)
-        end)
-        
-        if not computeSuccess then
-            UpdateDebug("Path computation failed, using direct movement")
-            humanoid:MoveTo(targetPosition)
-            local reached = humanoid.MoveToFinished:Wait(timeout)
-            return reached
-        end
-        
-        if path.Status == Enum.PathStatus.Success then
-            local waypoints = path:GetWaypoints()
-            UpdateDebug("Path found with " .. #waypoints .. " waypoints for " .. purpose)
+        while os.clock() - startTime < 10 do
+            if not _G.AutoFarm then return false end
             
-            for i, waypoint in ipairs(waypoints) do
-                if not _G.AutoFarm then break end
-                
-                -- Jump if needed
-                if waypoint.Action == Enum.PathWaypointAction.Jump then
-                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                    SafeWait(0.2)
-                end
-                
-                -- Move to waypoint with retries
-                local reached = false
-                local tries = 0
-                
-                while not reached and tries < maxRetries do
-                    humanoid:MoveTo(waypoint.Position)
-                    reached = humanoid.MoveToFinished:Wait(timeout)
-                    
-                    if not reached then
-                        tries = tries + 1
-                        UpdateDebug("Stuck at waypoint " .. i .. ", retry " .. tries .. "/" .. maxRetries)
-                        
-                        -- Try to unstuck
-                        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                        SafeWait(0.5)
-                        
-                        -- Small random movement to unstuck
-                        local randomOffset = Vector3.new(
-                            math.random(-2, 2),
-                            0,
-                            math.random(-2, 2)
-                        )
-                        humanoid:MoveTo(hrp.Position + randomOffset)
-                        humanoid.MoveToFinished:Wait(1)
-                    end
-                end
-                
-                if not reached then
-                    UpdateDebug("Failed to reach waypoint " .. i .. ", continuing to next")
-                end
+            local distance = (hrp.Position - targetPosition).Magnitude
+            if distance < 8 then
+                return true -- Close enough
             end
             
-            return true
-        else
-            UpdateDebug("No path found for " .. purpose .. ", using direct movement")
-            humanoid:MoveTo(targetPosition)
-            local reached = humanoid.MoveToFinished:Wait(timeout)
-            return reached
+            -- Check if stuck
+            if (hrp.Position - lastPosition).Magnitude < 1 then
+                stuckCount = stuckCount + 1
+                if stuckCount > 20 then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                    QuickWait(0.5)
+                    stuckCount = 0
+                end
+            else
+                stuckCount = 0
+            end
+            
+            lastPosition = hrp.Position
+            RunService.Heartbeat:Wait()
         end
+        
+        return false
     end)
 end
 
@@ -241,10 +189,10 @@ local function IsAtField()
     if not fieldPos then return false end
     
     local distance = (hrp.Position - fieldPos).Magnitude
-    return distance <= 50
+    return distance <= 30
 end
 
--- Get nearest token with improved logic
+-- Get nearest token
 local function GetNearestToken()
     return pcall(function()
         local character, humanoid, hrp = GetCharacter()
@@ -260,7 +208,6 @@ local function GetNearestToken()
         end
         
         if not tokensFolder then
-            UpdateDebug("No tokens folder found in workspace")
             return nil
         end
         
@@ -285,21 +232,14 @@ local function GetNearestToken()
             end
         end
         
-        if nearestToken then
-            UpdateDebug("Found token " .. math.floor(shortestDistance) .. " studs away")
-            return nearestToken
-        else
-            UpdateDebug("No collectible tokens found in range")
-            return nil
-        end
+        return nearestToken
     end)
 end
 
--- Field navigation system
+-- Navigate to field using simple movement
 local function NavigateToField()
     return pcall(function()
         _G.IsMovingToField = true
-        _G.PathfindingAttempts = 0
         
         local fieldPos = fieldCoords[_G.SelectedField]
         if not fieldPos then
@@ -307,133 +247,84 @@ local function NavigateToField()
             return false
         end
         
-        UpdateDebug("Starting navigation to " .. _G.SelectedField)
+        UpdateDebug("Moving to " .. _G.SelectedField)
         
-        while _G.AutoFarm and _G.PathfindingAttempts < _G.MaxPathfindingAttempts do
-            if IsAtField() then
-                UpdateDebug("Already at " .. _G.SelectedField)
-                _G.CurrentFarmField = _G.SelectedField
-                _G.IsMovingToField = false
-                return true
-            end
-            
-            _G.PathfindingAttempts = _G.PathfindingAttempts + 1
-            UpdateDebug("Pathfinding attempt " .. _G.PathfindingAttempts .. "/" .. _G.MaxPathfindingAttempts)
-            
-            local success, reached = MoveToPosition(fieldPos, {
-                purpose = _G.SelectedField,
-                maxRetries = 3,
-                timeout = 10
-            })
-            
-            if success and reached then
-                UpdateDebug("Successfully reached " .. _G.SelectedField)
-                _G.CurrentFarmField = _G.SelectedField
-                _G.IsMovingToField = false
-                return true
-            else
-                UpdateDebug("Failed to reach field, retrying...")
-                SafeWait(2)
-            end
+        local success = SimpleMoveTo(fieldPos)
+        
+        if success then
+            _G.CurrentFarmField = _G.SelectedField
+            UpdateDebug("Arrived at " .. _G.SelectedField)
+        else
+            UpdateDebug("Failed to reach field")
         end
         
         _G.IsMovingToField = false
-        UpdateDebug("Failed to navigate to field after " .. _G.MaxPathfindingAttempts .. " attempts")
-        return false
+        return success
     end)
 end
 -- Token collection system
 local function CollectTokens()
     return pcall(function()
-        UpdateDebug("Starting token collection in " .. _G.SelectedField)
+        UpdateDebug("Collecting tokens in " .. _G.SelectedField)
         
         local tokensCollected = 0
-        local maxTokensPerCycle = 10
+        local maxTokensPerCycle = 15
         
         while _G.AutoFarm and tokensCollected < maxTokensPerCycle do
-            -- Check if we're still at the correct field
-            if _G.CurrentFarmField ~= _G.SelectedField or not IsAtField() then
-                UpdateDebug("Field changed or moved away, stopping token collection")
+            -- Check if we need to go back to field
+            if not IsAtField() then
+                UpdateDebug("Not at field, returning...")
+                NavigateToField()
                 break
             end
             
             local success, token = GetNearestToken()
             
             if success and token then
-                UpdateDebug("Moving to collect token...")
+                local distance = (token.Position - GetCharacter().Position).Magnitude
+                UpdateDebug("Moving to token (" .. math.floor(distance) .. " studs)")
                 
-                local collectSuccess, reached = MoveToPosition(token.Position, {
-                    purpose = "token collection",
-                    maxRetries = 2,
-                    timeout = 5
-                })
+                local moveSuccess = SimpleMoveTo(token.Position)
                 
-                if collectSuccess and reached then
+                if moveSuccess then
                     tokensCollected = tokensCollected + 1
-                    UpdateDebug("Collected token " .. tokensCollected .. "/" .. maxTokensPerCycle)
-                    SafeWait(0.5) -- Small delay between token collections
+                    UpdateDebug("Token collected " .. tokensCollected .. "/" .. maxTokensPerCycle)
+                    QuickWait(0.3) -- Small delay between collections
                 else
-                    UpdateDebug("Failed to reach token, searching for next...")
+                    UpdateDebug("Failed to reach token")
                 end
             else
                 UpdateDebug("No tokens found, waiting...")
-                if not SafeWait(2) then break end
+                if not HeartbeatWait(2) then break end
             end
             
-            if not SafeWait(0.5) then break end
+            if not HeartbeatWait(0.5) then break end
         end
         
-        UpdateDebug("Token collection cycle completed")
         return true
     end)
 end
 
 -- Main farming loop
 local function StartFarming()
-    if _G.FarmTask then
-        task.cancel(_G.FarmTask)
-        _G.FarmTask = nil
-    end
+    if _G.FarmTask then return end
     
     _G.FarmTask = task.spawn(function()
         UpdateDebug("Auto Farm started")
         
         while _G.AutoFarm do
-            local farmingCycleSuccess = pcall(function()
-                -- Phase 1: Navigate to selected field
-                if _G.CurrentFarmField ~= _G.SelectedField or not IsAtField() then
-                    UpdateDebug("Need to navigate to field: " .. _G.SelectedField)
-                    local navSuccess = NavigateToField()
-                    
-                    if not navSuccess then
-                        UpdateDebug("Field navigation failed, retrying in 5 seconds...")
-                        if not SafeWait(5) then return end
-                    end
-                end
-                
-                -- Phase 2: Collect tokens at field
-                if IsAtField() and _G.CurrentFarmField == _G.SelectedField then
-                    UpdateDebug("At field, starting token collection...")
-                    CollectTokens()
-                else
-                    UpdateDebug("Not at field, cannot collect tokens")
-                end
-                
-                -- Phase 3: Field maintenance check
-                _G.FieldCheckCounter = _G.FieldCheckCounter + 1
-                if _G.FieldCheckCounter >= 10 then
-                    _G.FieldCheckCounter = 0
-                    UpdateDebug("Field maintenance check completed")
-                end
-                
-                -- Small delay between farming cycles
-                if not SafeWait(1) then return end
-            end)
-            
-            if not farmingCycleSuccess then
-                UpdateDebug("Error in farming cycle, continuing...")
-                SafeWait(3)
+            -- Always navigate to field first
+            if _G.CurrentFarmField ~= _G.SelectedField or not IsAtField() then
+                NavigateToField()
             end
+            
+            -- If at field, collect tokens
+            if IsAtField() and _G.CurrentFarmField == _G.SelectedField then
+                CollectTokens()
+            end
+            
+            -- Small delay between cycles
+            if not HeartbeatWait(1) then break end
         end
         
         UpdateDebug("Auto Farm stopped")
@@ -443,10 +334,7 @@ end
 
 -- Auto Dig system
 local function StartAutoDig()
-    if _G.DigTask then
-        task.cancel(_G.DigTask)
-        _G.DigTask = nil
-    end
+    if _G.DigTask then return end
     
     _G.DigTask = task.spawn(function()
         UpdateDebug("Auto Dig started")
@@ -482,12 +370,12 @@ local function StartAutoDig()
                     UpdateDebug("Fired " .. toolsFired .. " tool remotes")
                 end
                 
-                if not SafeWait(0.1) then return end
+                HeartbeatWait(0.1)
             end)
             
             if not digSuccess then
                 UpdateDebug("Error in auto dig, continuing...")
-                SafeWait(1)
+                HeartbeatWait(1)
             end
         end
         
@@ -546,9 +434,7 @@ local AutoFarmToggle = MainTab:CreateToggle({
     Callback = function(Value)
         _G.AutoFarm = Value
         if Value then
-            -- Reset field state to force navigation
             _G.CurrentFarmField = nil
-            _G.PathfindingAttempts = 0
             StartFarming()
         else
             if _G.FarmTask then
@@ -641,7 +527,7 @@ local EmergencyStop = SettingsTab:CreateButton({
 InfoTab:CreateSection("Script Information")
 InfoTab:CreateLabel("Atlas v2 fr - Made by sal")
 InfoTab:CreateLabel("Auto Dig: Fires all ToolRemotes every 0.1s")
-InfoTab:CreateLabel("Auto Farm: Pathfinds to field then collects tokens")
+InfoTab:CreateLabel("Auto Farm: Goes to field then collects tokens")
 InfoTab:CreateLabel("Field Selector: Choose where to farm")
 InfoTab:CreateLabel("Token Range: How far to look for tokens")
 
@@ -678,31 +564,21 @@ task.spawn(function()
         -- Update token range
         TokenLabel:Set("Text", "Token Range: " .. _G.TokenRange .. " studs")
         
-        SafeWait(0.5)
+        QuickWait(0.5)
     end
 end)
 
--- Auto-save configuration
+-- Apply on script start
 task.spawn(function()
-    while true do
-        SafeWait(30)
-        Rayfield:LoadConfiguration()
-        UpdateDebug("Configuration auto-saved")
-    end
-end)
-
--- Initial setup complete
-UpdateDebug("Atlas v2 fr loaded successfully!")
-UpdateDebug("Select a field and enable Auto Farm to start")
-
--- Load saved configuration
-Rayfield:LoadConfiguration()
-
--- Final initialization
-task.spawn(function()
-    SafeWait(2)
+    QuickWait(3)
     ApplyCharacterStats()
     UpdateDebug("Ready to use - Made by sal")
 end)
 
-return "Atlas v2 fr - Script loaded successfully!"
+-- Load saved configuration
+Rayfield:LoadConfiguration()
+
+UpdateDebug("Atlas v2 fr loaded successfully!")
+UpdateDebug("Select a field and enable Auto Farm to start")
+
+return "Atlas v2 fr - Heartbeat Edition loaded!"
