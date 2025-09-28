@@ -2,13 +2,13 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-   Name = "Autofarm Script",
-   LoadingTitle = "Autofarm System",
-   LoadingSubtitle = "by DeepSeek",
+   Name = "Atlas v2 fr",
+   LoadingTitle = "Atlas v2 fr",
+   LoadingSubtitle = "made by sal",
    ConfigurationSaving = {
       Enabled = true,
       FolderName = nil,
-      FileName = "AutoFarm"
+      FileName = "Atlasv2"
    },
    Discord = {
       Enabled = false,
@@ -28,14 +28,12 @@ local AutoDigToggle = MainTab:CreateToggle({
    Flag = "AutoDigToggle",
    Callback = function(Value)
        if Value then
-           -- Start auto dig loop
            _G.AutoDig = true
            while _G.AutoDig and task.wait(0.1) do
                pcall(function()
                    local player = game:GetService("Players").LocalPlayer
                    local character = player.Character or player.CharacterAdded:Wait()
                    
-                   -- Loop through all tools and fire ToolRemote
                    for _, item in ipairs(character:GetChildren()) do
                        if item:IsA("Tool") and item:FindFirstChild("ToolRemote") then
                            item.ToolRemote:FireServer()
@@ -56,10 +54,8 @@ local AutoFarmToggle = MainTab:CreateToggle({
    Flag = "AutoFarmToggle",
    Callback = function(Value)
        if Value then
-           -- Start auto farm
            _G.AutoFarm = true
            
-           -- Load pathfinding services
            local Players = game:GetService("Players")
            local PathfindingService = game:GetService("PathfindingService")
            local RunService = game:GetService("RunService")
@@ -69,7 +65,6 @@ local AutoFarmToggle = MainTab:CreateToggle({
            local humanoid = character:WaitForChild("Humanoid")
            local hrp = character:WaitForChild("HumanoidRootPart")
 
-           -- Pathfinding parameters
            local pathParams = {
                AgentRadius = 2,
                AgentHeight = 5,
@@ -101,7 +96,6 @@ local AutoFarmToggle = MainTab:CreateToggle({
                return closestToken, shortestDistance
            end
 
-           -- Function to move to target
            local function moveToTarget(target)
                local path = PathfindingService:CreatePath(pathParams)
                path:ComputeAsync(hrp.Position, target.Position)
@@ -136,7 +130,6 @@ local AutoFarmToggle = MainTab:CreateToggle({
                end
            end
 
-           -- Main farm loop
            task.spawn(function()
                while _G.AutoFarm do
                    pcall(function()
@@ -156,51 +149,14 @@ local AutoFarmToggle = MainTab:CreateToggle({
    end,
 })
 
--- Settings Tab
-local SettingsTab = Window:CreateTab("Settings", 4483362458)
-
-local Section = SettingsTab:CreateSection("Configuration")
-
--- Auto Farm Distance Setting
-local DistanceSlider = SettingsTab:CreateSlider({
-   Name = "Farm Distance Threshold",
-   Range = {5, 50},
-   Increment = 1,
-   Suffix = "Studs",
-   CurrentValue = 5,
-   Flag = "DistanceSlider",
-   Callback = function(Value)
-       _G.FarmDistance = Value
-   end,
-})
-
--- Performance Settings
-local PerformanceSection = SettingsTab:CreateSection("Performance")
-
-local WaitTimeSlider = SettingsTab:CreateSlider({
-   Name = "Loop Wait Time",
-   Range = {0.05, 1},
-   Increment = 0.05,
-   Suffix = "Seconds",
-   CurrentValue = 0.1,
-   Flag = "WaitTimeSlider",
-   Callback = function(Value)
-       _G.LoopWaitTime = Value
-   end,
-})
-
 -- Info Tab
 local InfoTab = Window:CreateTab("Information", 4483362458)
 
-InfoTab:CreateLabel("Auto Dig: Fires ToolRemote every 0.1 seconds")
-InfoTab:CreateLabel("Auto Farm: Collects tokens using pathfinding")
-InfoTab:CreateLabel("Make sure you have tools equipped for Auto Dig")
-InfoTab:CreateLabel("Game must have 'Debris/Tokens' folder structure")
+InfoTab:CreateLabel("Auto Dig: auto digs/auto uses ur collector")
+InfoTab:CreateLabel("Auto Farm: collects tokens and goes to convert(IN THE WORKS)")
 
 -- Initialize global variables
 _G.AutoDig = false
 _G.AutoFarm = false
-_G.FarmDistance = 5
-_G.LoopWaitTime = 0.1
 
 Rayfield:LoadConfiguration()
