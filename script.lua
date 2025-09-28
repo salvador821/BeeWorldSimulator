@@ -43,7 +43,6 @@ local fieldCoords = {
 _G.AutoDig = false
 _G.AutoFarm = false
 _G.SelectedField = "mango field"
-_G.TweenSpeed = 50
 _G.WalkSpeed = 16
 _G.JumpPower = 50
 _G.TokenRange = 100
@@ -55,19 +54,6 @@ local MainTab = Window:CreateTab("Main Features", 4483362458)
 
 -- Settings Tab
 local SettingsTab = Window:CreateTab("Settings", 4483362458)
-
--- Tween Speed Slider
-local TweenSpeedSlider = SettingsTab:CreateSlider({
-    Name = "Tween Speed",
-    Range = {10, 250},
-    Increment = 1,
-    Suffix = "Speed",
-    CurrentValue = 50,
-    Flag = "TweenSpeedSlider",
-    Callback = function(Value)
-        _G.TweenSpeed = Value
-    end,
-})
 
 -- Walk Speed Slider
 local WalkSpeedSlider = SettingsTab:CreateSlider({
@@ -164,6 +150,56 @@ local FieldDropdown = MainTab:CreateDropdown({
     end,
 })
 
+-- Pathfinding function to move to a position
+local function moveToPosition(targetPosition)
+    local PathfindingService = game:GetService("PathfindingService")
+    local player = game.Players.LocalPlayer
+    local character = player.Character
+    if not character then
+        character = player.CharacterAdded:Wait()
+    end
+    local humanoid = character:WaitForChild("Humanoid")
+    local hrp = character:WaitForChild("HumanoidRootPart")
+    
+    local pathParams = {
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        AgentCanClimb = true,
+        WaypointSpacing = 4,
+    }
+    
+    local path = PathfindingService:CreatePath(pathParams)
+    path:ComputeAsync(hrp.Position, targetPosition)
+    
+    if path.Status == Enum.PathStatus.Success then
+        local waypoints = path:GetWaypoints()
+        _G.DebugText = "Path found with " .. #waypoints .. " waypoints"
+        
+        for i, waypoint in ipairs(waypoints) do
+            if not _G.AutoFarm then break end
+            
+            humanoid:MoveTo(waypoint.Position)
+            
+            if waypoint.Action == Enum.PathWaypointAction.Jump then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+            
+            local reached = humanoid.MoveToFinished:Wait(5)
+            if not reached then
+                _G.DebugText = "Stuck, recomputing path..."
+                return moveToPosition(targetPosition)
+            end
+        end
+        return true
+    else
+        _G.DebugText = "No path found, using direct movement"
+        humanoid:MoveTo(targetPosition)
+        humanoid.MoveToFinished:Wait(5)
+        return true
+    end
+end
+
 -- Auto Dig Section
 local AutoDigToggle = MainTab:CreateToggle({
    Name = "Auto Dig",
@@ -202,50 +238,6 @@ local AutoFarmToggle = MainTab:CreateToggle({
            _G.AutoFarm = true
            _G.DebugText = "Auto Farm Started"
            
-           -- Reset current farm field to force tween
-           _G.CurrentFarmField = nil
-           
-           -- Function to tween to field
-           local function tweenToField()
-               if _G.SelectedField and fieldCoords[_G.SelectedField] then
-                   local player = game.Players.LocalPlayer
-                   local character = player.Character
-                   if not character then
-                       character = player.CharacterAdded:Wait()
-                   end
-                   local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-                   
-                   -- Calculate duration based on distance and speed
-                   local distance = (humanoidRootPart.Position - fieldCoords[_G.SelectedField]).Magnitude
-                   local duration = distance / _G.TweenSpeed
-                   
-                   _G.DebugText = "Tweening to " .. _G.SelectedField .. " (" .. math.floor(duration) .. "s)"
-                   
-                   local TweenService = game:GetService("TweenService")
-                   local tweenInfo = TweenInfo.new(
-                       math.max(1, duration), -- Minimum 1 second
-                       Enum.EasingStyle.Linear,
-                       Enum.EasingDirection.Out,
-                       0,
-                       false,
-                       0
-                   )
-                   
-                   local tween = TweenService:Create(
-                       humanoidRootPart,
-                       tweenInfo,
-                       {CFrame = CFrame.new(fieldCoords[_G.SelectedField])}
-                   )
-                   
-                   tween:Play()
-                   tween.Completed:Wait()
-                   _G.DebugText = "Arrived at " .. _G.SelectedField
-                   _G.CurrentFarmField = _G.SelectedField
-                   return true
-               end
-               return false
-           end
-           
            -- Start the main farming loop
            task.spawn(function()
                while _G.AutoFarm do
@@ -258,10 +250,15 @@ local AutoFarmToggle = MainTab:CreateToggle({
                        local hrp = character:WaitForChild("HumanoidRootPart")
                        local humanoid = character:WaitForChild("Humanoid")
                        
-                       -- Check if we need to tween to field
+                       -- Check if we need to pathfind to field
                        if _G.CurrentFarmField ~= _G.SelectedField then
-                           _G.DebugText = "Field changed! Tweening to new field..."
-                           tweenToField()
+                           _G.DebugText = "Pathfinding to " .. _G.SelectedField
+                           local fieldPos = fieldCoords[_G.SelectedField]
+                           
+                           if moveToPosition(fieldPos) then
+                               _G.CurrentFarmField = _G.SelectedField
+                               _G.DebugText = "Arrived at " .. _G.SelectedField
+                           end
                        end
                        
                        -- Check if we're at the field (close enough)
@@ -269,8 +266,10 @@ local AutoFarmToggle = MainTab:CreateToggle({
                        local distanceToField = (hrp.Position - fieldPos).Magnitude
                        
                        if distanceToField > 50 then
-                           _G.DebugText = "Too far from field, tweening again..."
-                           tweenToField()
+                           _G.DebugText = "Too far from field, pathfinding again..."
+                           if moveToPosition(fieldPos) then
+                               _G.DebugText = "Back at field, searching for tokens..."
+                           end
                        else
                            _G.DebugText = "At field, searching for tokens..."
                            
@@ -298,11 +297,10 @@ local AutoFarmToggle = MainTab:CreateToggle({
                                if nearestToken then
                                    _G.DebugText = "Moving to token (" .. math.floor(shortestDistance) .. " studs)"
                                    
-                                   -- Simple movement to token (bypass pathfinding if it's not working)
-                                   humanoid:MoveTo(nearestToken.Position)
-                                   
-                                   -- Wait a bit for movement
-                                   task.wait(2)
+                                   -- Use pathfinding to move to token
+                                   if moveToPosition(nearestToken.Position) then
+                                       _G.DebugText = "Reached token position"
+                                   end
                                else
                                    _G.DebugText = "No tokens found in range (" .. _G.TokenRange .. " studs)"
                                    task.wait(1)
@@ -313,7 +311,7 @@ local AutoFarmToggle = MainTab:CreateToggle({
                            end
                        end
                    end)
-                   task.wait(0.5) -- Small delay between cycles
+                   task.wait(0.5)
                end
            end)
        else
@@ -329,7 +327,7 @@ local InfoTab = Window:CreateTab("Information", 4483362458)
 
 local DebugLabel = InfoTab:CreateLabel("Debug: " .. _G.DebugText)
 InfoTab:CreateLabel("Auto Dig: Fires ToolRemote every 0.1 seconds")
-InfoTab:CreateLabel("Auto Farm: Tweens to field then collects tokens")
+InfoTab:CreateLabel("Auto Farm: Pathfinds to field then collects tokens")
 
 -- Update debug label every second
 task.spawn(function()
