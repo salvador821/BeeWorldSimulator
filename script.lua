@@ -39,8 +39,85 @@ local fieldCoords = {
     ["mountain field"] = Vector3.new(-1995.52, 71.78, -63.91)
 }
 
+-- Global variables
+_G.AutoDig = false
+_G.AutoFarm = false
+_G.SelectedField = "mango field"
+_G.TweenSpeed = 50
+_G.WalkSpeed = 16
+_G.JumpPower = 50
+_G.DebugText = "Waiting..."
+
 -- Main Tab
 local MainTab = Window:CreateTab("Main Features", 4483362458)
+
+-- Settings Tab
+local SettingsTab = Window:CreateTab("Settings", 4483362458)
+
+-- Tween Speed Slider
+local TweenSpeedSlider = SettingsTab:CreateSlider({
+    Name = "Tween Speed",
+    Range = {10, 250},
+    Increment = 1,
+    Suffix = "Speed",
+    CurrentValue = 50,
+    Flag = "TweenSpeedSlider",
+    Callback = function(Value)
+        _G.TweenSpeed = Value
+    end,
+})
+
+-- Walk Speed Slider
+local WalkSpeedSlider = SettingsTab:CreateSlider({
+    Name = "Walk Speed",
+    Range = {16, 120},
+    Increment = 1,
+    Suffix = "Speed",
+    CurrentValue = 16,
+    Flag = "WalkSpeedSlider",
+    Callback = function(Value)
+        _G.WalkSpeed = Value
+        applySpeed()
+    end,
+})
+
+-- Jump Power Slider
+local JumpPowerSlider = SettingsTab:CreateSlider({
+    Name = "Jump Power",
+    Range = {50, 120},
+    Increment = 1,
+    Suffix = "Power",
+    CurrentValue = 50,
+    Flag = "JumpPowerSlider",
+    Callback = function(Value)
+        _G.JumpPower = Value
+        applySpeed()
+    end,
+})
+
+-- Function to apply speed and jump power
+function applySpeed()
+    local player = game.Players.LocalPlayer
+    local character = player.Character
+    if character then
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = _G.WalkSpeed
+            humanoid.JumpPower = _G.JumpPower
+        end
+    end
+end
+
+-- Apply speed on character spawn
+game.Players.LocalPlayer.CharacterAdded:Connect(function(character)
+    wait(1) -- Wait for humanoid to load
+    applySpeed()
+end)
+
+-- Apply speed on startup
+if game.Players.LocalPlayer.Character then
+    applySpeed()
+end
 
 -- Field Selector Dropdown
 local FieldDropdown = MainTab:CreateDropdown({
@@ -68,23 +145,7 @@ local FieldDropdown = MainTab:CreateDropdown({
     Flag = "FieldDropdown",
     Callback = function(Option)
         _G.SelectedField = Option
-    end,
-})
-
--- Go to Field Button
-local GoToFieldButton = MainTab:CreateButton({
-    Name = "Go to Selected Field",
-    Callback = function()
-        if _G.SelectedField and fieldCoords[_G.SelectedField] then
-            local player = game.Players.LocalPlayer
-            local character = player.Character or player.CharacterAdded:Wait()
-            local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-            
-            -- Tween to the field coordinates
-            local tweenInfo = TweenInfo.new(10, Enum.EasingStyle.Linear)
-            local tween = game:GetService("TweenService"):Create(humanoidRootPart, tweenInfo, {Position = fieldCoords[_G.SelectedField]})
-            tween:Play()
-        end
+        _G.DebugText = "Field changed to: " .. Option
     end,
 })
 
@@ -96,6 +157,7 @@ local AutoDigToggle = MainTab:CreateToggle({
    Callback = function(Value)
        if Value then
            _G.AutoDig = true
+           _G.DebugText = "Auto Dig Started"
            while _G.AutoDig and task.wait(0.1) do
                pcall(function()
                    local player = game:GetService("Players").LocalPlayer
@@ -108,6 +170,7 @@ local AutoDigToggle = MainTab:CreateToggle({
                    end
                end)
            end
+           _G.DebugText = "Auto Dig Stopped"
        else
            _G.AutoDig = false
        end
@@ -122,7 +185,55 @@ local AutoFarmToggle = MainTab:CreateToggle({
    Callback = function(Value)
        if Value then
            _G.AutoFarm = true
+           _G.DebugText = "Auto Farm Started"
            
+           -- Store the field when we start farming
+           local currentFarmField = _G.SelectedField
+           
+           -- Function to tween to field
+           local function tweenToField()
+               if _G.SelectedField and fieldCoords[_G.SelectedField] then
+                   local player = game.Players.LocalPlayer
+                   local character = player.Character
+                   if not character then
+                       character = player.CharacterAdded:Wait()
+                   end
+                   local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+                   
+                   -- Calculate duration based on distance and speed
+                   local distance = (humanoidRootPart.Position - fieldCoords[_G.SelectedField]).Magnitude
+                   local duration = distance / _G.TweenSpeed
+                   
+                   _G.DebugText = "Tweening to " .. _G.SelectedField .. " (" .. math.floor(duration) .. "s)"
+                   
+                   local TweenService = game:GetService("TweenService")
+                   local tweenInfo = TweenInfo.new(
+                       duration,
+                       Enum.EasingStyle.Linear,
+                       Enum.EasingDirection.Out,
+                       0,
+                       false,
+                       0
+                   )
+                   
+                   local tween = TweenService:Create(
+                       humanoidRootPart,
+                       tweenInfo,
+                       {CFrame = CFrame.new(fieldCoords[_G.SelectedField])}
+                   )
+                   
+                   tween:Play()
+                   tween.Completed:Wait()
+                   _G.DebugText = "Arrived at " .. _G.SelectedField
+                   return true
+               end
+               return false
+           end
+           
+           -- Tween to field first
+           tweenToField()
+           
+           -- After tween completes, start pathfinding
            local Players = game:GetService("Players")
            local PathfindingService = game:GetService("PathfindingService")
            local RunService = game:GetService("RunService")
@@ -148,7 +259,10 @@ local AutoFarmToggle = MainTab:CreateToggle({
                local shortestDistance = math.huge
 
                local tokensFolder = workspace:FindFirstChild("Debris") and workspace.Debris:FindFirstChild("Tokens")
-               if not tokensFolder then return nil end
+               if not tokensFolder then 
+                   _G.DebugText = "No Tokens folder found"
+                   return nil 
+               end
 
                for _, token in pairs(tokensFolder:GetChildren()) do
                    if token:IsA("BasePart") and token:FindFirstChild("Token") and token:FindFirstChild("Collecting") and not token.Collecting.Value then
@@ -191,7 +305,7 @@ local AutoFarmToggle = MainTab:CreateToggle({
                    end
                    blockedConnection:Disconnect()
                else
-                   warn("No path found, using direct MoveTo.")
+                   _G.DebugText = "No path found, using direct MoveTo"
                    humanoid:MoveTo(target.Position)
                    humanoid.MoveToFinished:Wait()
                end
@@ -200,11 +314,23 @@ local AutoFarmToggle = MainTab:CreateToggle({
            task.spawn(function()
                while _G.AutoFarm do
                    pcall(function()
+                       -- Check if field changed mid-farming
+                       if _G.SelectedField ~= currentFarmField then
+                           _G.DebugText = "Field changed! Tweening to new field..."
+                           currentFarmField = _G.SelectedField
+                           tweenToField()
+                       end
+                       
                        local token, dist = getNearestToken()
                        if token then
+                           _G.DebugText = "Moving to token (" .. math.floor(dist) .. " studs away)"
                            if dist > 5 then
                                moveToTarget(token)
+                           else
+                               _G.DebugText = "Collecting token..."
                            end
+                       else
+                           _G.DebugText = "No tokens found"
                        end
                        task.wait(0.1)
                    end)
@@ -212,6 +338,7 @@ local AutoFarmToggle = MainTab:CreateToggle({
            end)
        else
            _G.AutoFarm = false
+           _G.DebugText = "Auto Farm Stopped"
        end
    end,
 })
@@ -220,12 +347,21 @@ local AutoFarmToggle = MainTab:CreateToggle({
 local InfoTab = Window:CreateTab("Information", 4483362458)
 
 InfoTab:CreateLabel("Auto Dig: Fires ToolRemote every 0.1 seconds")
-InfoTab:CreateLabel("Auto Farm: collects tokens and goes to convert(IN THE WORKS)")
-InfoTab:CreateLabel("Field Selector: Choose a field and click 'Go to Selected Field'")
+InfoTab:CreateLabel("Auto Farm: Tweens to selected field then collects tokens")
+InfoTab:CreateLabel("Debug: " .. _G.DebugText)
 
--- Initialize global variables
-_G.AutoDig = false
-_G.AutoFarm = false
-_G.SelectedField = "mango field"
+-- Update debug label every second
+task.spawn(function()
+    while task.wait(1) do
+        if InfoTab then
+            -- Refresh the debug label
+            for i, v in pairs(InfoTab:GetChildren()) do
+                if v.Name == "TextLabel" and string.find(v.Text, "Debug:") then
+                    v:Set("Text", "Debug: " .. _G.DebugText)
+                end
+            end
+        end
+    end
+end)
 
 Rayfield:LoadConfiguration()
